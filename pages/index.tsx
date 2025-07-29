@@ -11,8 +11,6 @@ export default function Home() {
   const [productPrice, setProductPrice] = useState(49.99);
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [loading, setLoading] = useState(false);
-}
-
 
   const fetchShippingRates = async () => {
     setLoading(true);
@@ -35,7 +33,7 @@ export default function Home() {
     }
   };
 
-  const handleCheckout = async (shippingOption: any) => {
+  const handleCheckout = async (shippingOption: ShippingRate) => {
     const res = await fetch("/api/create-checkout-session", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
