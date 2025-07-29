@@ -1,4 +1,5 @@
 // lib/shipping.ts
+
 export async function getShippingRates(zip: string) {
   const response = await fetch('https://ssapi.shipstation.com/shipments/getrates', {
     method: 'POST',
@@ -11,11 +12,11 @@ export async function getShippingRates(zip: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      carrierCode: 'stamps_com',
+      carrierCode: 'fedex', // FedEx로 한정
       packageCode: 'package',
       fromPostalCode: '10010',
       toPostalCode: zip,
-      toCountry: 'US',
+      toCountryCode: 'US', // 정확한 필드명
       weight: {
         value: 11,
         units: 'pounds',
@@ -36,5 +37,21 @@ export async function getShippingRates(zip: string) {
     throw new Error(`ShipStation error: ${errorText}`);
   }
 
-  return response.json();
+  const data = await response.json();
+
+  // 응답 구조에 따라 경로 조정 필요할 수 있음
+  const options = data.rateResponse?.shippingOptions || data || [];
+
+  // 원하는 FedEx 옵션만 필터링
+  const filteredOptions = options.filter(
+    (option: any) =>
+      option.serviceName === 'FedEx Standard Overnight' ||
+      option.serviceName === 'FedEx Priority Overnight'
+  );
+
+  // 필요한 필드만 추출해서 리턴
+  return filteredOptions.map((option: any) => ({
+    serviceName: option.serviceName,
+    shipmentCost: option.shipmentCost,
+  }));
 }
