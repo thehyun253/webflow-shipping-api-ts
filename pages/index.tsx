@@ -1,11 +1,18 @@
 import { useState } from "react";
 import Head from "next/head";
 
+type ShippingRate = {
+  serviceName: string;
+  shipmentCost: number;
+};
+
 export default function Home() {
   const [zip, setZip] = useState("");
-  const [productPrice, setProductPrice] = useState(49.99); // 상품 가격
-  const [shippingRates, setShippingRates] = useState([]);
+  const [productPrice, setProductPrice] = useState(49.99);
+  const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [loading, setLoading] = useState(false);
+}
+
 
   const fetchShippingRates = async () => {
     setLoading(true);
