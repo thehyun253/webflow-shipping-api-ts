@@ -1,4 +1,3 @@
-// lib/shipping.ts
 export async function getShippingRates(zip: string) {
   const response = await fetch('https://ssapi.shipstation.com/shipments/getrates', {
     method: 'POST',
@@ -15,7 +14,7 @@ export async function getShippingRates(zip: string) {
       packageCode: 'package',
       fromPostalCode: '10010',
       toPostalCode: zip,
-      toCountryCode: 'US',
+      toCountry: 'US', // ✅ 수정된 부분
       weight: {
         value: 11,
         units: 'pounds',
@@ -33,13 +32,10 @@ export async function getShippingRates(zip: string) {
 
   if (!response.ok) {
     const errorText = await response.text();
-    console.error('❌ ShipStation fetch error:', errorText);
     throw new Error(`ShipStation error: ${errorText}`);
   }
 
   const data = await response.json();
-  console.log('✅ ShipStation raw response:', JSON.stringify(data, null, 2)); // 👈 로그 추가
-
   const options = data.rateResponse?.shippingOptions || data || [];
 
   const filteredOptions = options.filter(
