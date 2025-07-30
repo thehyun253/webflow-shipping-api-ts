@@ -26,7 +26,7 @@ export async function getShippingRates(zip: string) {
         height: 8.5,
       },
       confirmation: 'none',
-      residential: true,
+      residential: false,
     }),
   });
 
