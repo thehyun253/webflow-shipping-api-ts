@@ -13,6 +13,7 @@ export async function getShippingRates(zip: string) {
       carrierCode: 'fedex',
       packageCode: 'package',
       fromPostalCode: '10010',
+      fromCountry: 'US', // ✅ 추가
       toPostalCode: zip,
       toCountry: 'US', // ✅ 수정된 부분
       weight: {
