@@ -10,7 +10,7 @@ export async function getShippingRates(zip: string) {
       'Content-Type': 'application/json',
     },
     body: JSON.stringify({
-      carrierCode: 'fedex',
+      carrierCode: 'fedex_walleted',
       packageCode: 'package',
       fromPostalCode: '10010',
       fromCountry: 'US', // ✅ 추가
