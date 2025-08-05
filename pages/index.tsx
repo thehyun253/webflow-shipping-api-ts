@@ -12,8 +12,13 @@ export default function Home() {
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // 🚚 배송 옵션만 조회
+  // 🚚 배송 옵션 조회
   const fetchShippingRates = async () => {
+    if (!/^\d{5}$/.test(zip)) {
+      alert("유효한 ZIP 코드를 입력하세요 (5자리 숫자)");
+      return;
+    }
+
     setLoading(true);
     try {
       const res = await fetch("/api/get-shipping-rates", {
@@ -37,22 +42,32 @@ export default function Home() {
 
   // ✅ 고객이 배송 옵션을 선택하고 결제 버튼 클릭
   const handleCheckout = async (shippingOption: ShippingRate) => {
-    const res = await fetch("/api/create-checkout-session", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        zip,
-        productPrice,
-        shippingCost: shippingOption.shipmentCost,
-        shippingName: shippingOption.serviceName,
-      }),
-    });
+    if (!/^\d{5}$/.test(zip)) {
+      alert("유효한 ZIP 코드를 먼저 입력하세요");
+      return;
+    }
 
-    const data = await res.json();
-    if (data.url) {
-      window.location.href = data.url;
-    } else {
-      alert("결제 페이지로 이동할 수 없습니다");
+    try {
+      const res = await fetch("/api/create-checkout-session", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          zip,
+          productPrice,
+          shippingCost: shippingOption.shipmentCost,
+          shippingName: shippingOption.serviceName,
+        }),
+      });
+
+      const data = await res.json();
+      if (data.url) {
+        window.location.href = data.url;
+      } else {
+        alert("결제 페이지로 이동할 수 없습니다");
+      }
+    } catch (err) {
+      console.error("Checkout Error:", err);
+      alert("결제 처리 중 오류가 발생했습니다");
     }
   };
 
@@ -81,7 +96,10 @@ export default function Home() {
                 <li key={i} style={{ marginBottom: "1rem" }}>
                   <strong>{rate.serviceName}</strong> — ${rate.shipmentCost.toFixed(2)}
                   <br />
-                  <button onClick={() => handleCheckout(rate)}>
+                  <button
+                    onClick={() => handleCheckout(rate)}
+                    disabled={!/^\d{5}$/.test(zip)} // 유효하지 않으면 비활성화
+                  >
                     이 옵션으로 결제
                   </button>
                 </li>
