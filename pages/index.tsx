@@ -12,10 +12,10 @@ export default function Home() {
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // 🚚 Fetch available shipping rates
+  // Fetch shipping options
   const fetchShippingRates = async () => {
-    if (!/^\d{5}$/.test(zip)) {
-      alert("Please enter a valid 5-digit ZIP code.");
+    if (!zip || zip.trim().length < 5) {
+      alert("Please enter a valid ZIP code.");
       return;
     }
 
@@ -26,6 +26,7 @@ export default function Home() {
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ zip }),
       });
+
       const data = await res.json();
       if (Array.isArray(data)) {
         setShippingRates(data);
@@ -34,50 +35,45 @@ export default function Home() {
       }
     } catch (e) {
       console.error("Shipping rate error", e);
-      alert("An error occurred while fetching shipping options.");
+      alert("Error fetching shipping rates.");
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ Handle Stripe Checkout
+  // Handle checkout with selected shipping option
   const handleCheckout = async (shippingOption: ShippingRate) => {
-    if (!/^\d{5}$/.test(zip)) {
-      alert("Please enter a valid ZIP code before checkout.");
+    if (!zip || zip.trim().length < 5) {
+      alert("Please enter a valid ZIP code.");
       return;
     }
 
-    try {
-      const res = await fetch("/api/create-checkout-session", {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          zip,
-          productPrice,
-          shippingCost: shippingOption.shipmentCost,
-          shippingName: shippingOption.serviceName,
-        }),
-      });
+    const res = await fetch("/api/create-checkout-session", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        zip,
+        productPrice,
+        shippingCost: shippingOption.shipmentCost,
+        shippingName: shippingOption.serviceName,
+      }),
+    });
 
-      const data = await res.json();
-      if (data.url) {
-        window.location.href = data.url;
-      } else {
-        alert("Failed to redirect to the checkout page.");
-      }
-    } catch (err) {
-      console.error("Checkout error:", err);
-      alert("An error occurred during checkout.");
+    const data = await res.json();
+    if (data.url) {
+      window.location.href = data.url;
+    } else {
+      alert("Failed to redirect to Stripe Checkout");
     }
   };
 
   return (
     <>
       <Head>
-        <title>Shipping + Stripe Demo</title>
+        <title>Shipping + Stripe Checkout</title>
       </Head>
       <main style={{ padding: "2rem" }}>
-        <h1>Enter Your ZIP Code</h1>
+        <h1>Enter ZIP Code for Shipping</h1>
         <input
           type="text"
           placeholder="ZIP Code"
@@ -90,17 +86,14 @@ export default function Home() {
 
         {shippingRates.length > 0 && (
           <div style={{ marginTop: "2rem" }}>
-            <h2>Select a Shipping Option</h2>
+            <h2>Select Shipping Option</h2>
             <ul>
               {shippingRates.map((rate, i) => (
                 <li key={i} style={{ marginBottom: "1rem" }}>
                   <strong>{rate.serviceName}</strong> — ${rate.shipmentCost.toFixed(2)}
                   <br />
-                  <button
-                    onClick={() => handleCheckout(rate)}
-                    disabled={!/^\d{5}$/.test(zip)}
-                  >
-                    Checkout with This Option
+                  <button onClick={() => handleCheckout(rate)}>
+                    Checkout with this Option
                   </button>
                 </li>
               ))}
