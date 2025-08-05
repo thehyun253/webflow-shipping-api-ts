@@ -1,4 +1,28 @@
 export async function getShippingRates(zip: string) {
+  const payload = {
+    carrierCode: 'fedex_walleted',
+    packageCode: 'package',
+    fromPostalCode: '10010',
+    fromCountry: 'US',
+    toPostalCode: zip,
+    toCountry: 'US',
+    weight: {
+      value: 11,
+      units: 'pounds',
+    },
+    dimensions: {
+      units: 'inches',
+      length: 17.25,
+      width: 14.5,
+      height: 8.5,
+    },
+    confirmation: 'none',
+    residential: false,
+  };
+
+  // ✅ 요청 payload 로그
+  console.log('📤 ShipStation 요청 payload:', JSON.stringify(payload, null, 2));
+
   const response = await fetch('https://ssapi.shipstation.com/shipments/getrates', {
     method: 'POST',
     headers: {
@@ -9,35 +33,20 @@ export async function getShippingRates(zip: string) {
         ).toString('base64'),
       'Content-Type': 'application/json',
     },
-    body: JSON.stringify({
-      carrierCode: 'fedex_walleted',
-      packageCode: 'package',
-      fromPostalCode: '10010',
-      fromCountry: 'US', // ✅ 추가
-      toPostalCode: zip,
-      toCountry: 'US', // ✅ 수정된 부분
-      weight: {
-        value: 11,
-        units: 'pounds',
-      },
-      dimensions: {
-        units: 'inches',
-        length: 17.25,
-        width: 14.5,
-        height: 8.5,
-      },
-      confirmation: 'none',
-      residential: false,
-    }),
+    body: JSON.stringify(payload),
   });
 
   if (!response.ok) {
     const errorText = await response.text();
-    throw new Error(`ShipStation error: ${errorText}`);
+    throw new Error(`❌ ShipStation error: ${errorText}`);
   }
 
   const data = await response.json();
-  const options = data.rateResponse?.shippingOptions || data || [];
+
+  // ✅ 응답 전체 로그
+  console.log('📦 ShipStation 응답 전체:', JSON.stringify(data, null, 2));
+
+  const options = data.rateResponse?.shippingOptions || [];
 
   const filteredOptions = options.filter(
     (option: any) =>
