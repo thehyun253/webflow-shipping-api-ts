@@ -8,14 +8,14 @@ type ShippingRate = {
 
 export default function Home() {
   const [zip, setZip] = useState("");
-  const [productPrice] = useState(49.99); // 고정 상품 가격
+  const [productPrice] = useState(49.99); // Fixed product price
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // 🚚 배송 옵션 조회
+  // 🚚 Fetch available shipping rates
   const fetchShippingRates = async () => {
     if (!/^\d{5}$/.test(zip)) {
-      alert("유효한 ZIP 코드를 입력하세요 (5자리 숫자)");
+      alert("Please enter a valid 5-digit ZIP code.");
       return;
     }
 
@@ -30,20 +30,20 @@ export default function Home() {
       if (Array.isArray(data)) {
         setShippingRates(data);
       } else {
-        alert("배송 옵션을 불러올 수 없습니다");
+        alert("Unable to fetch shipping options.");
       }
     } catch (e) {
-      console.error("배송 옵션 오류", e);
-      alert("배송 옵션 오류");
+      console.error("Shipping rate error", e);
+      alert("An error occurred while fetching shipping options.");
     } finally {
       setLoading(false);
     }
   };
 
-  // ✅ 고객이 배송 옵션을 선택하고 결제 버튼 클릭
+  // ✅ Handle Stripe Checkout
   const handleCheckout = async (shippingOption: ShippingRate) => {
     if (!/^\d{5}$/.test(zip)) {
-      alert("유효한 ZIP 코드를 먼저 입력하세요");
+      alert("Please enter a valid ZIP code before checkout.");
       return;
     }
 
@@ -63,11 +63,11 @@ export default function Home() {
       if (data.url) {
         window.location.href = data.url;
       } else {
-        alert("결제 페이지로 이동할 수 없습니다");
+        alert("Failed to redirect to the checkout page.");
       }
     } catch (err) {
-      console.error("Checkout Error:", err);
-      alert("결제 처리 중 오류가 발생했습니다");
+      console.error("Checkout error:", err);
+      alert("An error occurred during checkout.");
     }
   };
 
@@ -77,7 +77,7 @@ export default function Home() {
         <title>Shipping + Stripe Demo</title>
       </Head>
       <main style={{ padding: "2rem" }}>
-        <h1>배송지 ZIP 입력</h1>
+        <h1>Enter Your ZIP Code</h1>
         <input
           type="text"
           placeholder="ZIP Code"
@@ -85,12 +85,12 @@ export default function Home() {
           onChange={(e) => setZip(e.target.value)}
         />
         <button onClick={fetchShippingRates} disabled={loading || !zip}>
-          배송비 계산
+          Calculate Shipping
         </button>
 
         {shippingRates.length > 0 && (
           <div style={{ marginTop: "2rem" }}>
-            <h2>배송 옵션 선택</h2>
+            <h2>Select a Shipping Option</h2>
             <ul>
               {shippingRates.map((rate, i) => (
                 <li key={i} style={{ marginBottom: "1rem" }}>
@@ -98,9 +98,9 @@ export default function Home() {
                   <br />
                   <button
                     onClick={() => handleCheckout(rate)}
-                    disabled={!/^\d{5}$/.test(zip)} // 유효하지 않으면 비활성화
+                    disabled={!/^\d{5}$/.test(zip)}
                   >
-                    이 옵션으로 결제
+                    Checkout with This Option
                   </button>
                 </li>
               ))}
