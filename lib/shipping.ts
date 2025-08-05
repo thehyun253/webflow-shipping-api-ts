@@ -1,9 +1,13 @@
 export async function getShippingRates(zip: string) {
+  console.log(`🚚 getShippingRates 호출: toPostalCode = ${zip}`);
+
   const payload = {
     carrierCode: 'fedex_walleted',
     packageCode: 'package',
     fromPostalCode: '10010',
     fromCountry: 'US',
+    fromState: 'NY',           // ✅ 추가
+    fromCity: 'New York',      // ✅ 추가
     toPostalCode: zip,
     toCountry: 'US',
     weight: {
@@ -17,7 +21,7 @@ export async function getShippingRates(zip: string) {
       height: 8.5,
     },
     confirmation: 'none',
-    residential: false,
+    residential: true,
   };
 
   // ✅ 요청 payload 로그
@@ -48,11 +52,17 @@ export async function getShippingRates(zip: string) {
 
   const options = data.rateResponse?.shippingOptions || [];
 
+  if (options.length === 0) {
+    console.warn(`⚠️ ShipStation: shippingOptions이 비어있음. ZIP: ${zip}`);
+  }
+
   const filteredOptions = options.filter(
     (option: any) =>
       option.serviceName === 'FedEx Standard Overnight' ||
       option.serviceName === 'FedEx Priority Overnight'
   );
+
+  console.log(`✅ 최종 filtered options:`, filteredOptions);
 
   return filteredOptions.map((option: any) => ({
     serviceName: option.serviceName,
