@@ -13,7 +13,7 @@ export async function getShippingRates(zip: string) {
     weight: { value: 11, units: 'pounds' },
     dimensions: { units: 'inches', length: 17.25, width: 14.5, height: 8.5 },
     confirmation: 'none',
-    residential: true,
+    residential: false,
   };
 
   console.log('📤 ShipStation 요청 payload:', JSON.stringify(payload, null, 2));
