@@ -37,21 +37,35 @@ export async function getShippingRates(zip: string) {
   const data = await response.json();
   console.log('📦 ShipStation 응답 전체:', JSON.stringify(data, null, 2));
 
-  const options = data.rateResponse?.shippingOptions || [];
+
+
+
+ // 변경1) ShipStation 응답 형태 대응 (배열 or rateResponse.shippingOptions)
+  const options = Array.isArray(data)
+    ? data
+    : (data?.rateResponse?.shippingOptions || data?.shippingOptions || []);
+
   if (options.length === 0) {
-    console.warn(`⚠️ ShipStation: shippingOptions이 비어있음. ZIP: ${zip}`);
+    console.warn(`⚠️ ShipStation: options이 비어있음. ZIP: ${zip}`);
   }
 
-  const filteredOptions = options.filter(
-    (option: any) =>
-      option.serviceName === 'FedEx Standard Overnight®' ||
-      option.serviceName === 'FedEx Priority Overnight®'
+  // 변경2) serviceName -> serviceCode로 필터
+  const allowedServiceCodes = new Set([
+    'fedex_priority_overnight',
+    'fedex_standard_overnight',
+  ]);
+
+  const filteredOptions = options.filter((option: any) =>
+    allowedServiceCodes.has(option.serviceCode)
   );
 
-  console.log('✅ 최종 filtered options:', filteredOptions);
+  const filtered = options.filter((o: any) => allowedServiceCodes.has(o.serviceCode));
 
-  return filteredOptions.map((option: any) => ({
-    serviceName: option.serviceName,
-    shipmentCost: option.shipmentCost,
+  console.log("filtered options:", filtered);
+
+  return filtered.map((o: any) => ({
+    serviceName: o.serviceName,
+    serviceCode: o.serviceCode,
+    shipmentCost: o.shipmentCost,
   }));
 }

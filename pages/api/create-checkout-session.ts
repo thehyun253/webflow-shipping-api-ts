@@ -32,12 +32,30 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     // ✅ shippingCost가 없으면 기본 배송비 조회 (선택 사항)
     let finalShippingCost = shippingCost;
+    let finalShippingName = shippingName;
+
     if (typeof finalShippingCost !== "number") {
       const rates = await getShippingRates(zip);
+      
+      // 잘못된 금액 결제 방지: rates가 비는 경우
       if (!rates || rates.length === 0) {
-        return res.status(500).json({ message: "Failed to get shipping cost" });
+        return res.status(422).json({
+          message:
+            "No eligible FedEx Overnight rates found for this ZIP. Please verify the address/ZIP or contact support.",
+        });
       }
-      finalShippingCost = rates[0].shipmentCost;
+
+      // Priority Overnight 우선, 없으면 첫 번째 값 사용
+      const preferred =
+        rates.find((r: any) => r.serviceCode === "fedex_priority_overnight") ?? rates[0];
+
+      finalShippingCost = preferred.shipmentCost;
+      finalShippingName = preferred.serviceName;
+    }
+
+    // 혹시라도 숫자가 아니면 중단(Stripe 에러 예방)
+    if (typeof finalShippingCost !== "number" || Number.isNaN(finalShippingCost)) {
+      return res.status(500).json({ message: "Failed to resolve shipping cost" });
     }
 
     // ✅ Stripe 결제 세션 생성
