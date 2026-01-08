@@ -75,11 +75,20 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           quantity: 1,
         },
       ],
+      
       success_url: "https://thehyun.com/order-confirmation",
       cancel_url: "https://thehyun.com/checkout",
     });
 
-    res.status(200).json({ url: session.url });
+    res.status(200).json({
+      url: session.url,
+      debug: {
+        zip,
+        productPrice,
+        finalShippingCost,
+        total: productPrice + finalShippingCost,
+      },
+    });
   } catch (error: any) {
     console.error("❌ Stripe session creation failed:", error.message);
     res.status(500).json({ message: "Failed to create Stripe session" });
