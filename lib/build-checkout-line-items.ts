@@ -1,15 +1,22 @@
 import type Stripe from "stripe";
-import type { NormalizedCheckoutItem } from "@/lib/validate-checkout-request";
+import type { NormalizedCheckoutItem, NormalizedWeight } from "@/lib/validate-checkout-request";
 import { toCents } from "@/lib/validate-checkout-prices";
 
-function productDataForItem(item: NormalizedCheckoutItem): Stripe.Checkout.SessionCreateParams.LineItem.PriceData.ProductData {
-  const base: Stripe.Checkout.SessionCreateParams.LineItem.PriceData.ProductData = {
+/** rules.md §7·§8: `Qty` 필수, Weight 있으면 `Weight · Qty` 한 줄. */
+function productDescriptionForLine(weight: NormalizedWeight, qty: number): string {
+  const qtyPart = `Qty: ${qty}`;
+  if (weight === false) return qtyPart;
+  return `Weight: ${weight} · ${qtyPart}`;
+}
+
+function productDataForItem(
+  item: NormalizedCheckoutItem,
+  qtyForDescription: number
+): Stripe.Checkout.SessionCreateParams.LineItem.PriceData.ProductData {
+  return {
     name: item.name,
+    description: productDescriptionForLine(item.weight, qtyForDescription),
   };
-  if (item.weight !== false) {
-    base.description = `Weight: ${item.weight}`;
-  }
-  return base;
 }
 
 export function buildProductLineItems(
@@ -27,13 +34,7 @@ export function buildProductLineItems(
       out.push({
         price_data: {
           currency: "usd",
-          product_data: {
-            ...productDataForItem(item),
-            description:
-              item.weight !== false
-                ? `Weight: ${item.weight} (qty ${q})`
-                : `qty ${q}`,
-          },
+          product_data: productDataForItem(item, q),
           unit_amount: lineCents,
         },
         quantity: 1,
@@ -44,7 +45,7 @@ export function buildProductLineItems(
     out.push({
       price_data: {
         currency: "usd",
-        product_data: productDataForItem(item),
+        product_data: productDataForItem(item, q),
         unit_amount: unitAmount,
       },
       quantity: q,
@@ -55,7 +56,7 @@ export function buildProductLineItems(
         price_data: {
           currency: "usd",
           product_data: {
-            ...productDataForItem(item),
+            ...productDataForItem(item, q),
             name: `${item.name} (remainder)`,
           },
           unit_amount: remainder,
@@ -70,13 +71,18 @@ export function buildProductLineItems(
 
 export function buildShippingLineItem(
   finalShippingCost: number,
-  serviceName: string
+  boxCount: number
 ): Stripe.Checkout.SessionCreateParams.LineItem {
+  const boxes = Math.max(1, boxCount);
+  const description =
+    boxes === 1 ? "Ships in 1 box" : `Ships in ${boxes} boxes`;
+
   return {
     price_data: {
       currency: "usd",
       product_data: {
-        name: serviceName || "Shipping",
+        name: "Shipping",
+        description,
       },
       unit_amount: Math.round(finalShippingCost * 100),
     },

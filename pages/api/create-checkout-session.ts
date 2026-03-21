@@ -45,11 +45,10 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     let packMeta = { totalPacks: 0, boxCount: 0 };
     let finalShippingCost: number;
-    let finalShippingName: string | undefined;
+    let carrierServiceName: string | undefined;
 
     if (!isDeliver) {
       finalShippingCost = 0;
-      finalShippingName = undefined;
     } else {
       packMeta = computeOrderPacks(items);
       const rates = await getShippingRates(zip!);
@@ -62,9 +61,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       }
 
       const oneBox = rates[0];
+      carrierServiceName = oneBox.serviceName;
       const rawShipping = oneBox.shipmentCost * packMeta.boxCount;
       finalShippingCost = Math.round(rawShipping * 100) / 100;
-      finalShippingName = oneBox.serviceName;
     }
 
     if (Number.isNaN(finalShippingCost)) {
@@ -75,9 +74,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ...buildProductLineItems(items),
     ];
     if (isDeliver && finalShippingCost > 0) {
-      lineItems.push(
-        buildShippingLineItem(finalShippingCost, finalShippingName ?? "Shipping")
-      );
+      lineItems.push(buildShippingLineItem(finalShippingCost, packMeta.boxCount));
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -101,6 +98,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             shipping: finalShippingCost,
             boxes: packMeta.boxCount,
             packs: packMeta.totalPacks,
+            ...(carrierServiceName ? { carrierService: carrierServiceName } : {}),
           }
         : { pickup: true, productPrice }
     );
