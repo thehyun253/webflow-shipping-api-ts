@@ -8,11 +8,10 @@ type ShippingRate = {
 
 export default function Home() {
   const [zip, setZip] = useState("");
-  const [productPrice] = useState(49.99); // Fixed product price
+  const [productPrice] = useState(49.99);
   const [shippingRates, setShippingRates] = useState<ShippingRate[]>([]);
   const [loading, setLoading] = useState(false);
 
-  // Fetch shipping options
   const fetchShippingRates = async () => {
     if (!zip || zip.trim().length < 5) {
       alert("Please enter a valid ZIP code.");
@@ -41,8 +40,7 @@ export default function Home() {
     }
   };
 
-  // Handle checkout with selected shipping option
-  const handleCheckout = async (shippingOption: ShippingRate) => {
+  const handleCheckout = async () => {
     if (!zip || zip.trim().length < 5) {
       alert("Please enter a valid ZIP code.");
       return;
@@ -66,8 +64,6 @@ export default function Home() {
             weight: false,
           },
         ],
-        shippingCost: shippingOption.shipmentCost,
-        shippingName: shippingOption.serviceName,
       }),
     });
 
@@ -75,7 +71,7 @@ export default function Home() {
     if (data.url) {
       window.location.href = data.url;
     } else {
-      alert("Failed to redirect to Stripe Checkout");
+      alert(data.message || "Failed to redirect to Stripe Checkout");
     }
   };
 
@@ -98,18 +94,21 @@ export default function Home() {
 
         {shippingRates.length > 0 && (
           <div style={{ marginTop: "2rem" }}>
-            <h2>Select Shipping Option</h2>
+            <h2>Shipping (server-calculated at checkout)</h2>
+            <p style={{ color: "#555", fontSize: "0.9rem" }}>
+              Preview shows FedEx Priority Overnight (1 box). Final shipping uses your cart lines and
+              box count on the server.
+            </p>
             <ul>
               {shippingRates.map((rate, i) => (
                 <li key={i} style={{ marginBottom: "1rem" }}>
-                  <strong>{rate.serviceName}</strong> — ${rate.shipmentCost.toFixed(2)}
-                  <br />
-                  <button onClick={() => handleCheckout(rate)}>
-                    Checkout with this Option
-                  </button>
+                  <strong>{rate.serviceName}</strong> — ${rate.shipmentCost.toFixed(2)} (1 box)
                 </li>
               ))}
             </ul>
+            <button type="button" onClick={handleCheckout}>
+              Checkout
+            </button>
           </div>
         )}
       </main>

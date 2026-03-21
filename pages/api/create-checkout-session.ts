@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
+import { computeOrderPacks } from "@/lib/compute-order-packs";
 import { getShippingRates } from "@/lib/shipping";
 import { validateCheckoutPrices } from "@/lib/validate-checkout-prices";
 import {
@@ -31,50 +32,41 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const parsed = validateCheckoutRequest(req.body);
     if (!parsed.ok) {
-      console.log("[checkout] request validation failed");
       return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
     }
 
     const priceCheck = validateCheckoutPrices(parsed.data);
     if (!priceCheck.ok) {
-      console.log("[checkout] price validation failed");
       return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
     }
 
     const { productPrice, isDeliver, zip, items } = parsed.data;
-    const { shippingCost, shippingName } = req.body as {
-      shippingCost?: unknown;
-      shippingName?: unknown;
-    };
 
-    let finalShippingCost: number | undefined = typeof shippingCost === "number" && !Number.isNaN(shippingCost)
-      ? shippingCost
-      : undefined;
-    let finalShippingName =
-      typeof shippingName === "string" ? shippingName : undefined;
+    let packMeta = { totalPacks: 0, boxCount: 0 };
+    let finalShippingCost: number;
+    let finalShippingName: string | undefined;
 
     if (!isDeliver) {
       finalShippingCost = 0;
       finalShippingName = undefined;
-    } else if (typeof finalShippingCost !== "number") {
+    } else {
+      packMeta = computeOrderPacks(items);
       const rates = await getShippingRates(zip!);
 
       if (!rates || rates.length === 0) {
-        console.log("[checkout] no rates for zip", zip);
+        console.log("[checkout] no rate", zip);
         return res.status(422).json({
           message: SHIPPING_UNAVAILABLE_MESSAGE,
         });
       }
 
-      const preferred =
-        rates.find((r: { serviceCode?: string }) => r.serviceCode === "fedex_priority_overnight") ??
-        rates[0];
-
-      finalShippingCost = preferred.shipmentCost;
-      finalShippingName = preferred.serviceName;
+      const oneBox = rates[0];
+      const rawShipping = oneBox.shipmentCost * packMeta.boxCount;
+      finalShippingCost = Math.round(rawShipping * 100) / 100;
+      finalShippingName = oneBox.serviceName;
     }
 
-    if (typeof finalShippingCost !== "number" || Number.isNaN(finalShippingCost)) {
+    if (Number.isNaN(finalShippingCost)) {
       return res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
     }
 
@@ -101,12 +93,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       cancel_url: "https://thehyun.com/checkout",
     });
 
-    console.log("[checkout] ok", {
-      isDeliver,
-      productPrice,
-      shipping: finalShippingCost,
-      lines: items.length,
-    });
+    console.log(
+      "[checkout] ok",
+      isDeliver
+        ? {
+            shipping: finalShippingCost,
+            boxes: packMeta.boxCount,
+            packs: packMeta.totalPacks,
+          }
+        : { pickup: true, productPrice }
+    );
 
     res.status(200).json({
       url: session.url,
@@ -116,6 +112,12 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         isDeliver,
         itemCount: items.length,
         sumCents: priceCheck.sumCents,
+        ...(isDeliver
+          ? {
+              totalPacks: packMeta.totalPacks,
+              boxCount: packMeta.boxCount,
+            }
+          : {}),
         finalShippingCost,
         total: productPrice + finalShippingCost,
       },
