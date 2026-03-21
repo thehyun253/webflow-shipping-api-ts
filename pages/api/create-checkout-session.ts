@@ -1,5 +1,6 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
+import { buildProductLineItems, buildShippingLineItem } from "@/lib/build-checkout-line-items";
 import { computeOrderPacks } from "@/lib/compute-order-packs";
 import { getShippingRates } from "@/lib/shipping";
 import { validateCheckoutPrices } from "@/lib/validate-checkout-prices";
@@ -70,25 +71,25 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       return res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
     }
 
+    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
+      ...buildProductLineItems(items),
+    ];
+    if (isDeliver && finalShippingCost > 0) {
+      lineItems.push(
+        buildShippingLineItem(finalShippingCost, finalShippingName ?? "Shipping")
+      );
+    }
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
-      line_items: [
-        {
-          price_data: {
-            currency: "usd",
-            product_data: {
-              name: "Your Product",
-              ...(isDeliver && finalShippingName
-                ? { description: finalShippingName }
-                : {}),
-            },
-            unit_amount: Math.round((productPrice + finalShippingCost) * 100),
-          },
-          quantity: 1,
-        },
-      ],
-
+      line_items: lineItems,
+      metadata: {
+        source: "webflow_checkout",
+        is_deliver: isDeliver ? "true" : "false",
+        item_count: String(items.length),
+        box_count: String(isDeliver ? packMeta.boxCount : 0),
+      },
       success_url: "https://thehyun.com/order-confirmation",
       cancel_url: "https://thehyun.com/checkout",
     });
