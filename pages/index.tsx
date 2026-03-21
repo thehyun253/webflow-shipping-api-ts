@@ -54,6 +54,18 @@ export default function Home() {
       body: JSON.stringify({
         zip,
         productPrice,
+        isDeliver: true,
+        items: [
+          {
+            name: "Demo Product",
+            quantity: 1,
+            price: productPrice,
+            "single-price": productPrice,
+            isBundle: false,
+            isGift: false,
+            weight: false,
+          },
+        ],
         shippingCost: shippingOption.shipmentCost,
         shippingName: shippingOption.serviceName,
       }),

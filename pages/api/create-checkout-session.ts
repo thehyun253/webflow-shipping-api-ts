@@ -1,12 +1,17 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { getShippingRates } from "@/lib/shipping";
+import {
+  CHECKOUT_VALIDATION_ERROR_MESSAGE,
+  PAYMENT_SERVER_ERROR_MESSAGE,
+  SHIPPING_UNAVAILABLE_MESSAGE,
+  validateCheckoutRequest,
+} from "@/lib/validate-checkout-request";
 
 const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
   apiVersion: "2025-06-30.basil",
 });
 
-// ✅
 function setCors(res: NextApiResponse) {
   res.setHeader("Access-Control-Allow-Origin", "https://www.thehyun.com");
   res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
@@ -14,9 +19,8 @@ function setCors(res: NextApiResponse) {
 }
 
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
-  setCors(res); // ✅
+  setCors(res);
 
-  // ✅
   if (req.method === "OPTIONS") return res.status(200).end();
 
   if (req.method !== "POST") {
@@ -24,41 +28,47 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   }
 
   try {
-    const { zip, productPrice, shippingCost, shippingName } = req.body;
-
-    if (!zip || typeof productPrice !== "number") {
-      return res.status(400).json({ message: "Missing or invalid zip/productPrice" });
+    const parsed = validateCheckoutRequest(req.body);
+    if (!parsed.ok) {
+      return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
     }
 
-    // ✅ shippingCost가 없으면 기본 배송비 조회 (선택 사항)
-    let finalShippingCost = shippingCost;
-    let finalShippingName = shippingName;
+    const { productPrice, isDeliver, zip, items } = parsed.data;
+    const { shippingCost, shippingName } = req.body as {
+      shippingCost?: unknown;
+      shippingName?: unknown;
+    };
 
-    if (typeof finalShippingCost !== "number") {
-      const rates = await getShippingRates(zip);
-      
-      // 잘못된 금액 결제 방지: rates가 비는 경우
+    let finalShippingCost: number | undefined = typeof shippingCost === "number" && !Number.isNaN(shippingCost)
+      ? shippingCost
+      : undefined;
+    let finalShippingName =
+      typeof shippingName === "string" ? shippingName : undefined;
+
+    if (!isDeliver) {
+      finalShippingCost = 0;
+      finalShippingName = undefined;
+    } else if (typeof finalShippingCost !== "number") {
+      const rates = await getShippingRates(zip!);
+
       if (!rates || rates.length === 0) {
         return res.status(422).json({
-          message:
-            "No eligible FedEx Overnight rates found for this ZIP. Please verify the address/ZIP or contact support.",
+          message: SHIPPING_UNAVAILABLE_MESSAGE,
         });
       }
 
-      // Priority Overnight 우선, 없으면 첫 번째 값 사용
       const preferred =
-        rates.find((r: any) => r.serviceCode === "fedex_priority_overnight") ?? rates[0];
+        rates.find((r: { serviceCode?: string }) => r.serviceCode === "fedex_priority_overnight") ??
+        rates[0];
 
       finalShippingCost = preferred.shipmentCost;
       finalShippingName = preferred.serviceName;
     }
 
-    // 혹시라도 숫자가 아니면 중단(Stripe 에러 예방)
     if (typeof finalShippingCost !== "number" || Number.isNaN(finalShippingCost)) {
-      return res.status(500).json({ message: "Failed to resolve shipping cost" });
+      return res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
     }
 
-    // ✅ Stripe 결제 세션 생성
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
@@ -68,14 +78,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             currency: "usd",
             product_data: {
               name: "Your Product",
-              description: shippingName || "Standard Shipping",
+              ...(isDeliver && finalShippingName
+                ? { description: finalShippingName }
+                : {}),
             },
-            unit_amount: Math.round((productPrice + finalShippingCost) * 100), // 단위: 센트
+            unit_amount: Math.round((productPrice + finalShippingCost) * 100),
           },
           quantity: 1,
         },
       ],
-      
+
       success_url: "https://thehyun.com/order-confirmation",
       cancel_url: "https://thehyun.com/checkout",
     });
@@ -83,14 +95,17 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     res.status(200).json({
       url: session.url,
       debug: {
-        zip,
+        zip: zip ?? null,
         productPrice,
+        isDeliver,
+        itemCount: items.length,
         finalShippingCost,
         total: productPrice + finalShippingCost,
       },
     });
-  } catch (error: any) {
-    console.error("❌ Stripe session creation failed:", error.message);
-    res.status(500).json({ message: "Failed to create Stripe session" });
+  } catch (error: unknown) {
+    const message = error instanceof Error ? error.message : String(error);
+    console.error("Stripe session creation failed:", message);
+    res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
   }
 }
