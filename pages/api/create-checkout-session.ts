@@ -1,6 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { getShippingRates } from "@/lib/shipping";
+import { validateCheckoutPrices } from "@/lib/validate-checkout-prices";
 import {
   CHECKOUT_VALIDATION_ERROR_MESSAGE,
   PAYMENT_SERVER_ERROR_MESSAGE,
@@ -30,6 +31,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
   try {
     const parsed = validateCheckoutRequest(req.body);
     if (!parsed.ok) {
+      console.log("[checkout] request validation failed");
+      return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
+    }
+
+    const priceCheck = validateCheckoutPrices(parsed.data);
+    if (!priceCheck.ok) {
+      console.log("[checkout] price validation failed");
       return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
     }
 
@@ -52,6 +60,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       const rates = await getShippingRates(zip!);
 
       if (!rates || rates.length === 0) {
+        console.log("[checkout] no rates for zip", zip);
         return res.status(422).json({
           message: SHIPPING_UNAVAILABLE_MESSAGE,
         });
@@ -92,6 +101,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       cancel_url: "https://thehyun.com/checkout",
     });
 
+    console.log("[checkout] ok", {
+      isDeliver,
+      productPrice,
+      shipping: finalShippingCost,
+      lines: items.length,
+    });
+
     res.status(200).json({
       url: session.url,
       debug: {
@@ -99,6 +115,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         productPrice,
         isDeliver,
         itemCount: items.length,
+        sumCents: priceCheck.sumCents,
         finalShippingCost,
         total: productPrice + finalShippingCost,
       },
