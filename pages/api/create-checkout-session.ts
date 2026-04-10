@@ -1,8 +1,7 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
 import { buildProductLineItems, buildShippingLineItem } from "@/lib/build-checkout-line-items";
-import { computeOrderPacks } from "@/lib/compute-order-packs";
-import { getShippingRates } from "@/lib/shipping";
+import { getShippingQuote, ShippingQuoteError, SHIPPING_QUOTE_ERRORS } from "@/lib/get-shipping-quote";
 import { validateCheckoutPrices } from "@/lib/validate-checkout-prices";
 import {
   CHECKOUT_VALIDATION_ERROR_MESSAGE,
@@ -43,28 +42,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const { productPrice, isDeliver, zip, items } = parsed.data;
 
-    let packMeta = { totalPacks: 0, boxCount: 0 };
-    let finalShippingCost: number;
-    let carrierServiceName: string | undefined;
-
-    if (!isDeliver) {
-      finalShippingCost = 0;
-    } else {
-      packMeta = computeOrderPacks(items);
-      const rates = await getShippingRates(zip!);
-
-      if (!rates || rates.length === 0) {
-        console.log("[checkout] no rate", zip);
-        return res.status(422).json({
-          message: SHIPPING_UNAVAILABLE_MESSAGE,
-        });
-      }
-
-      const oneBox = rates[0];
-      carrierServiceName = oneBox.serviceName;
-      const rawShipping = oneBox.shipmentCost * packMeta.boxCount;
-      finalShippingCost = Math.round(rawShipping * 100) / 100;
-    }
+    const quote = await getShippingQuote({ zip, isDeliver, items });
+    const finalShippingCost = quote.shippingCost;
 
     if (Number.isNaN(finalShippingCost)) {
       return res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
@@ -74,7 +53,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       ...buildProductLineItems(items),
     ];
     if (isDeliver && finalShippingCost > 0) {
-      lineItems.push(buildShippingLineItem(finalShippingCost, packMeta.boxCount));
+      lineItems.push(buildShippingLineItem(finalShippingCost, quote.boxCount));
     }
 
     const session = await stripe.checkout.sessions.create({
@@ -85,7 +64,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         source: "webflow_checkout",
         is_deliver: isDeliver ? "true" : "false",
         item_count: String(items.length),
-        box_count: String(isDeliver ? packMeta.boxCount : 0),
+        box_count: String(isDeliver ? quote.boxCount : 0),
       },
       success_url: "https://thehyun.com/order-confirmation",
       cancel_url: "https://thehyun.com/checkout",
@@ -96,9 +75,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       isDeliver
         ? {
             shipping: finalShippingCost,
-            boxes: packMeta.boxCount,
-            packs: packMeta.totalPacks,
-            ...(carrierServiceName ? { carrierService: carrierServiceName } : {}),
+            boxes: quote.boxCount,
+            packs: quote.totalPacks,
+            ...(quote.serviceName ? { carrierService: quote.serviceName } : {}),
           }
         : { pickup: true, productPrice }
     );
@@ -113,8 +92,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         sumCents: priceCheck.sumCents,
         ...(isDeliver
           ? {
-              totalPacks: packMeta.totalPacks,
-              boxCount: packMeta.boxCount,
+              totalPacks: quote.totalPacks,
+              boxCount: quote.boxCount,
             }
           : {}),
         finalShippingCost,
@@ -122,6 +101,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       },
     });
   } catch (error: unknown) {
+    if (
+      error instanceof ShippingQuoteError &&
+      error.code === SHIPPING_QUOTE_ERRORS.SHIPPING_UNAVAILABLE
+    ) {
+      return res.status(422).json({ message: SHIPPING_UNAVAILABLE_MESSAGE });
+    }
+
     const message = error instanceof Error ? error.message : String(error);
     console.error("Stripe session creation failed:", message);
     res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
