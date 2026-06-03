@@ -20,6 +20,20 @@ function setCors(res: NextApiResponse) {
   res.setHeader("Access-Control-Allow-Headers", "Content-Type");
 }
 
+function normalizeGiftMessage(body: any) {
+  const enabled = body?.giftMessageEnabled === "yes" ? "yes" : "no";
+
+  const rawMessage =
+    typeof body?.giftMessageText === "string" ? body.giftMessageText : "";
+
+  const message = enabled === "yes" ? rawMessage.trim() : "";
+
+  return {
+    giftMessageEnabled: enabled,
+    giftMessageText: message,
+  };
+}
+
 export default async function handler(req: NextApiRequest, res: NextApiResponse) {
   setCors(res);
 
@@ -42,6 +56,8 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
     const { productPrice, isDeliver, zip, items } = parsed.data;
 
+    const { giftMessageEnabled, giftMessageText } = normalizeGiftMessage(req.body);
+
     const quote = await getShippingQuote({ zip, isDeliver, items });
     const finalShippingCost = quote.shippingCost;
 
@@ -52,6 +68,7 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
     const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
       ...buildProductLineItems(items),
     ];
+
     if (isDeliver && finalShippingCost > 0) {
       lineItems.push(buildShippingLineItem(finalShippingCost, quote.boxCount));
     }
@@ -65,6 +82,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
         is_deliver: isDeliver ? "true" : "false",
         item_count: String(items.length),
         box_count: String(isDeliver ? quote.boxCount : 0),
+
+        gift_message_enabled: giftMessageEnabled,
+        gift_message: giftMessageText,
       },
       success_url: "https://thehyun.com/order-confirmation",
       cancel_url: "https://thehyun.com/checkout",
@@ -77,9 +97,16 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
             shipping: finalShippingCost,
             boxes: quote.boxCount,
             packs: quote.totalPacks,
+            giftMessageEnabled,
+            hasGiftMessage: giftMessageText.length > 0,
             ...(quote.serviceName ? { carrierService: quote.serviceName } : {}),
           }
-        : { pickup: true, productPrice }
+        : {
+            pickup: true,
+            productPrice,
+            giftMessageEnabled,
+            hasGiftMessage: giftMessageText.length > 0,
+          }
     );
 
     res.status(200).json({
@@ -98,6 +125,9 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           : {}),
         finalShippingCost,
         total: productPrice + finalShippingCost,
+
+        giftMessageEnabled,
+        giftMessageText,
       },
     });
   } catch (error: unknown) {
