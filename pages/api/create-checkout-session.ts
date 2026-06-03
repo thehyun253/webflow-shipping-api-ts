@@ -45,11 +45,13 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
 
   try {
     const parsed = validateCheckoutRequest(req.body);
+
     if (!parsed.ok) {
       return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
     }
 
     const priceCheck = validateCheckoutPrices(parsed.data);
+
     if (!priceCheck.ok) {
       return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
     }
@@ -73,19 +75,26 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
       lineItems.push(buildShippingLineItem(finalShippingCost, quote.boxCount));
     }
 
+    const checkoutMetadata = {
+      source: "webflow_checkout",
+      is_deliver: isDeliver ? "true" : "false",
+      item_count: String(items.length),
+      box_count: String(isDeliver ? quote.boxCount : 0),
+      gift_message_enabled: giftMessageEnabled,
+      gift_message: giftMessageText,
+    };
+
     const session = await stripe.checkout.sessions.create({
       mode: "payment",
       payment_method_types: ["card"],
       line_items: lineItems,
-      metadata: {
-        source: "webflow_checkout",
-        is_deliver: isDeliver ? "true" : "false",
-        item_count: String(items.length),
-        box_count: String(isDeliver ? quote.boxCount : 0),
 
-        gift_message_enabled: giftMessageEnabled,
-        gift_message: giftMessageText,
+      metadata: checkoutMetadata,
+
+      payment_intent_data: {
+        metadata: checkoutMetadata,
       },
+
       success_url: "https://thehyun.com/order-confirmation",
       cancel_url: "https://thehyun.com/checkout",
     });
@@ -125,7 +134,6 @@ export default async function handler(req: NextApiRequest, res: NextApiResponse)
           : {}),
         finalShippingCost,
         total: productPrice + finalShippingCost,
-
         giftMessageEnabled,
         giftMessageText,
       },
