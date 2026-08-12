@@ -1,8 +1,21 @@
+// pages/api/create-checkout-session.ts
+
 import type { NextApiRequest, NextApiResponse } from "next";
 import Stripe from "stripe";
-import { buildProductLineItems, buildShippingLineItem } from "@/lib/build-checkout-line-items";
-import { getShippingQuote, ShippingQuoteError, SHIPPING_QUOTE_ERRORS } from "@/lib/get-shipping-quote";
+
+import {
+  buildProductLineItems,
+  buildShippingLineItem,
+} from "@/lib/build-checkout-line-items";
+
+import {
+  getShippingQuote,
+  ShippingQuoteError,
+  SHIPPING_QUOTE_ERRORS,
+} from "@/lib/get-shipping-quote";
+
 import { validateCheckoutPrices } from "@/lib/validate-checkout-prices";
+
 import {
   CHECKOUT_VALIDATION_ERROR_MESSAGE,
   PAYMENT_SERVER_ERROR_MESSAGE,
@@ -15,18 +28,37 @@ const stripe = new Stripe(process.env.STRIPE_SECRET_KEY!, {
 });
 
 function setCors(res: NextApiResponse) {
-  res.setHeader("Access-Control-Allow-Origin", "https://www.thehyun.com");
-  res.setHeader("Access-Control-Allow-Methods", "POST, OPTIONS");
-  res.setHeader("Access-Control-Allow-Headers", "Content-Type");
+  res.setHeader(
+    "Access-Control-Allow-Origin",
+    "https://www.thehyun.com"
+  );
+
+  res.setHeader(
+    "Access-Control-Allow-Methods",
+    "POST, OPTIONS"
+  );
+
+  res.setHeader(
+    "Access-Control-Allow-Headers",
+    "Content-Type"
+  );
 }
 
 function normalizeGiftMessage(body: any) {
-  const enabled = body?.giftMessageEnabled === "yes" ? "yes" : "no";
+  const enabled =
+    body?.giftMessageEnabled === "yes"
+      ? "yes"
+      : "no";
 
   const rawMessage =
-    typeof body?.giftMessageText === "string" ? body.giftMessageText : "";
+    typeof body?.giftMessageText === "string"
+      ? body.giftMessageText
+      : "";
 
-  const message = enabled === "yes" ? rawMessage.trim() : "";
+  const message =
+    enabled === "yes"
+      ? rawMessage.trim()
+      : "";
 
   return {
     giftMessageEnabled: enabled,
@@ -34,120 +66,294 @@ function normalizeGiftMessage(body: any) {
   };
 }
 
-export default async function handler(req: NextApiRequest, res: NextApiResponse) {
+export default async function handler(
+  req: NextApiRequest,
+  res: NextApiResponse
+) {
   setCors(res);
 
-  if (req.method === "OPTIONS") return res.status(200).end();
+  if (req.method === "OPTIONS") {
+    return res.status(200).end();
+  }
 
   if (req.method !== "POST") {
-    return res.status(405).json({ message: "Method Not Allowed" });
+    return res.status(405).json({
+      message: "Method Not Allowed",
+    });
   }
 
   try {
-    const parsed = validateCheckoutRequest(req.body);
+    // =====================================================
+    // 1. Webflow 요청 검증
+    // =====================================================
+
+    const parsed =
+      validateCheckoutRequest(req.body);
 
     if (!parsed.ok) {
-      return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
+      return res.status(400).json({
+        message:
+          CHECKOUT_VALIDATION_ERROR_MESSAGE,
+      });
     }
 
-    const priceCheck = validateCheckoutPrices(parsed.data);
+    // =====================================================
+    // 2. 가격 검증
+    // =====================================================
+
+    const priceCheck =
+      validateCheckoutPrices(parsed.data);
 
     if (!priceCheck.ok) {
-      return res.status(400).json({ message: CHECKOUT_VALIDATION_ERROR_MESSAGE });
+      return res.status(400).json({
+        message:
+          CHECKOUT_VALIDATION_ERROR_MESSAGE,
+      });
     }
 
-    const { productPrice, isDeliver, zip, items } = parsed.data;
+    const {
+      productPrice,
+      isDeliver,
+      zip,
+      items,
+    } = parsed.data;
 
-    const { giftMessageEnabled, giftMessageText } = normalizeGiftMessage(req.body);
+    const {
+      giftMessageEnabled,
+      giftMessageText,
+    } = normalizeGiftMessage(req.body);
 
-    const quote = await getShippingQuote({ zip, isDeliver, items });
-    const finalShippingCost = quote.shippingCost;
+    // =====================================================
+    // 3. ShipStation 배송비 계산
+    // =====================================================
+
+    const quote =
+      await getShippingQuote({
+        zip,
+        isDeliver,
+        items,
+      });
+
+    const finalShippingCost =
+      quote.shippingCost;
 
     if (Number.isNaN(finalShippingCost)) {
-      return res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
+      return res.status(500).json({
+        message:
+          PAYMENT_SERVER_ERROR_MESSAGE,
+      });
     }
 
-    const lineItems: Stripe.Checkout.SessionCreateParams.LineItem[] = [
-      ...buildProductLineItems(items),
-    ];
+    // =====================================================
+    // 4. Stripe Line Items 구성
+    // =====================================================
 
-    if (isDeliver && finalShippingCost > 0) {
-      lineItems.push(buildShippingLineItem(finalShippingCost, quote.boxCount));
+    const lineItems:
+      Stripe.Checkout.SessionCreateParams.LineItem[] =
+      [
+        ...buildProductLineItems(items),
+      ];
+
+    if (
+      isDeliver &&
+      finalShippingCost > 0
+    ) {
+      lineItems.push(
+        buildShippingLineItem(
+          finalShippingCost,
+          quote.boxCount
+        )
+      );
     }
+
+    // =====================================================
+    // 5. Stripe Metadata
+    // =====================================================
 
     const checkoutMetadata = {
       source: "webflow_checkout",
-      is_deliver: isDeliver ? "true" : "false",
-      item_count: String(items.length),
-      box_count: String(isDeliver ? quote.boxCount : 0),
-      gift_message_enabled: giftMessageEnabled,
-      gift_message: giftMessageText,
+
+      is_deliver:
+        isDeliver ? "true" : "false",
+
+      item_count:
+        String(items.length),
+
+      box_count:
+        String(
+          isDeliver
+            ? quote.boxCount
+            : 0
+        ),
+
+      gift_message_enabled:
+        giftMessageEnabled,
+
+      gift_message:
+        giftMessageText,
+
+      shipping_service:
+        isDeliver
+          ? quote.serviceName ?? ""
+          : "",
     };
 
-    const session = await stripe.checkout.sessions.create({
-      mode: "payment",
-      payment_method_types: ["card"],
-      line_items: lineItems,
+    // =====================================================
+    // 6. Stripe Checkout Session 생성
+    // =====================================================
 
-      metadata: checkoutMetadata,
+    const session =
+      await stripe.checkout.sessions.create({
+        mode: "payment",
 
-      payment_intent_data: {
-        metadata: checkoutMetadata,
-      },
+        payment_method_types: [
+          "card",
+        ],
 
-      success_url: "https://thehyun.com/order-confirmation",
-      cancel_url: "https://thehyun.com/checkout",
-    });
+        line_items: lineItems,
+
+        metadata:
+          checkoutMetadata,
+
+        payment_intent_data: {
+          metadata:
+            checkoutMetadata,
+        },
+
+        // Delivery일 때만
+        // Stripe에서 배송주소 수집
+        ...(isDeliver
+          ? {
+              shipping_address_collection:
+                {
+                  allowed_countries: [
+                    "US" as const,
+                  ],
+                },
+            }
+          : {}),
+
+        // 이름/이메일은 Checkout에서 기본 수집
+        // 전화번호도 필요하므로 활성화
+        phone_number_collection: {
+          enabled: true,
+        },
+
+        success_url:
+          "https://thehyun.com/order-confirmation?session_id={CHECKOUT_SESSION_ID}",
+
+        cancel_url:
+          "https://thehyun.com/checkout",
+      });
 
     console.log(
       "[checkout] ok",
       isDeliver
         ? {
-            shipping: finalShippingCost,
-            boxes: quote.boxCount,
-            packs: quote.totalPacks,
+            shipping:
+              finalShippingCost,
+
+            boxes:
+              quote.boxCount,
+
+            packs:
+              quote.totalPacks,
+
+            carrierService:
+              quote.serviceName ??
+              "",
+
             giftMessageEnabled,
-            hasGiftMessage: giftMessageText.length > 0,
-            ...(quote.serviceName ? { carrierService: quote.serviceName } : {}),
+
+            hasGiftMessage:
+              giftMessageText.length >
+              0,
           }
         : {
             pickup: true,
+
             productPrice,
+
             giftMessageEnabled,
-            hasGiftMessage: giftMessageText.length > 0,
+
+            hasGiftMessage:
+              giftMessageText.length >
+              0,
           }
     );
 
-    res.status(200).json({
+    // =====================================================
+    // 7. Webflow에 Checkout URL 반환
+    // =====================================================
+
+    return res.status(200).json({
       url: session.url,
+
       debug: {
-        zip: zip ?? null,
+        zip:
+          zip ?? null,
+
         productPrice,
+
         isDeliver,
-        itemCount: items.length,
-        sumCents: priceCheck.sumCents,
+
+        itemCount:
+          items.length,
+
+        sumCents:
+          priceCheck.sumCents,
+
         ...(isDeliver
           ? {
-              totalPacks: quote.totalPacks,
-              boxCount: quote.boxCount,
+              totalPacks:
+                quote.totalPacks,
+
+              boxCount:
+                quote.boxCount,
+
+              shippingService:
+                quote.serviceName ??
+                "",
             }
           : {}),
+
         finalShippingCost,
-        total: productPrice + finalShippingCost,
+
+        total:
+          productPrice +
+          finalShippingCost,
+
         giftMessageEnabled,
+
         giftMessageText,
       },
     });
   } catch (error: unknown) {
     if (
-      error instanceof ShippingQuoteError &&
-      error.code === SHIPPING_QUOTE_ERRORS.SHIPPING_UNAVAILABLE
+      error instanceof
+        ShippingQuoteError &&
+      error.code ===
+        SHIPPING_QUOTE_ERRORS.SHIPPING_UNAVAILABLE
     ) {
-      return res.status(422).json({ message: SHIPPING_UNAVAILABLE_MESSAGE });
+      return res.status(422).json({
+        message:
+          SHIPPING_UNAVAILABLE_MESSAGE,
+      });
     }
 
-    const message = error instanceof Error ? error.message : String(error);
-    console.error("Stripe session creation failed:", message);
-    res.status(500).json({ message: PAYMENT_SERVER_ERROR_MESSAGE });
+    const message =
+      error instanceof Error
+        ? error.message
+        : String(error);
+
+    console.error(
+      "Stripe session creation failed:",
+      message
+    );
+
+    return res.status(500).json({
+      message:
+        PAYMENT_SERVER_ERROR_MESSAGE,
+    });
   }
 }
