@@ -32,12 +32,10 @@ function setCors(res: NextApiResponse) {
     "Access-Control-Allow-Origin",
     "https://www.thehyun.com"
   );
-
   res.setHeader(
     "Access-Control-Allow-Methods",
     "POST, OPTIONS"
   );
-
   res.setHeader(
     "Access-Control-Allow-Headers",
     "Content-Type"
@@ -83,10 +81,6 @@ export default async function handler(
   }
 
   try {
-    // =====================================================
-    // 1. Webflow 요청 검증
-    // =====================================================
-
     const parsed =
       validateCheckoutRequest(req.body);
 
@@ -96,10 +90,6 @@ export default async function handler(
           CHECKOUT_VALIDATION_ERROR_MESSAGE,
       });
     }
-
-    // =====================================================
-    // 2. 가격 검증
-    // =====================================================
 
     const priceCheck =
       validateCheckoutPrices(parsed.data);
@@ -123,10 +113,7 @@ export default async function handler(
       giftMessageText,
     } = normalizeGiftMessage(req.body);
 
-    // =====================================================
-    // 3. ShipStation 배송비 계산
-    // =====================================================
-
+    // ShipStation rate calculation
     const quote =
       await getShippingQuote({
         zip,
@@ -144,10 +131,7 @@ export default async function handler(
       });
     }
 
-    // =====================================================
-    // 4. Stripe Line Items 구성
-    // =====================================================
-
+    // Stripe line items
     const lineItems:
       Stripe.Checkout.SessionCreateParams.LineItem[] =
       [
@@ -166,10 +150,7 @@ export default async function handler(
       );
     }
 
-    // =====================================================
-    // 5. Stripe Metadata
-    // =====================================================
-
+    // Checkout metadata
     const checkoutMetadata = {
       source: "webflow_checkout",
 
@@ -186,29 +167,23 @@ export default async function handler(
             : 0
         ),
 
+      shipping_service:
+        isDeliver
+          ? quote.serviceName ?? ""
+          : "",
+
       gift_message_enabled:
         giftMessageEnabled,
 
       gift_message:
         giftMessageText,
-
-      shipping_service:
-        isDeliver
-          ? quote.serviceName ?? ""
-          : "",
     };
-
-    // =====================================================
-    // 6. Stripe Checkout Session 생성
-    // =====================================================
 
     const session =
       await stripe.checkout.sessions.create({
         mode: "payment",
 
-        payment_method_types: [
-          "card",
-        ],
+        payment_method_types: ["card"],
 
         line_items: lineItems,
 
@@ -220,21 +195,16 @@ export default async function handler(
             checkoutMetadata,
         },
 
-        // Delivery일 때만
-        // Stripe에서 배송주소 수집
+        // Delivery일 때만 Stripe에서 배송주소 수집
         ...(isDeliver
           ? {
-              shipping_address_collection:
-                {
-                  allowed_countries: [
-                    "US" as const,
-                  ],
-                },
+              shipping_address_collection: {
+                allowed_countries: ["US"],
+              },
             }
           : {}),
 
-        // 이름/이메일은 Checkout에서 기본 수집
-        // 전화번호도 필요하므로 활성화
+        // 고객 전화번호 수집
         phone_number_collection: {
           enabled: true,
         },
@@ -252,39 +222,24 @@ export default async function handler(
         ? {
             shipping:
               finalShippingCost,
-
             boxes:
               quote.boxCount,
-
             packs:
               quote.totalPacks,
-
             carrierService:
-              quote.serviceName ??
-              "",
-
+              quote.serviceName ?? "",
             giftMessageEnabled,
-
             hasGiftMessage:
-              giftMessageText.length >
-              0,
+              giftMessageText.length > 0,
           }
         : {
             pickup: true,
-
             productPrice,
-
             giftMessageEnabled,
-
             hasGiftMessage:
-              giftMessageText.length >
-              0,
+              giftMessageText.length > 0,
           }
     );
-
-    // =====================================================
-    // 7. Webflow에 Checkout URL 반환
-    // =====================================================
 
     return res.status(200).json({
       url: session.url,
@@ -312,8 +267,7 @@ export default async function handler(
                 quote.boxCount,
 
               shippingService:
-                quote.serviceName ??
-                "",
+                quote.serviceName ?? "",
             }
           : {}),
 
