@@ -27,6 +27,10 @@ export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
+  // =====================================================
+  // 1. Stripe webhook은 POST만 허용
+  // =====================================================
+
   if (req.method !== "POST") {
     return res
       .status(405)
@@ -35,25 +39,20 @@ export default async function handler(
 
   let event: Stripe.Event;
 
-  // Stripe signature verification
+  // =====================================================
+  // 2. Stripe webhook signature 검증
+  // =====================================================
+
   try {
-    const rawBody =
-      await buffer(req);
+    const rawBody = await buffer(req);
 
     const sig =
-      req.headers[
-        "stripe-signature"
-      ];
+      req.headers["stripe-signature"];
 
-    if (
-      !sig ||
-      Array.isArray(sig)
-    ) {
+    if (!sig || Array.isArray(sig)) {
       return res
         .status(400)
-        .send(
-          "Missing Stripe signature"
-        );
+        .send("Missing Stripe signature");
     }
 
     event =
@@ -75,10 +74,12 @@ export default async function handler(
 
     return res
       .status(400)
-      .send(
-        `Webhook Error: ${message}`
-      );
+      .send(`Webhook Error: ${message}`);
   }
+
+  // =====================================================
+  // 3. Stripe 이벤트 처리
+  // =====================================================
 
   try {
     switch (event.type) {
@@ -87,7 +88,10 @@ export default async function handler(
           event.data
             .object as Stripe.Checkout.Session;
 
+        // =================================================
         // 최신 Checkout Session 다시 조회
+        // =================================================
+
         const session =
           await stripe.checkout.sessions.retrieve(
             eventSession.id,
@@ -100,10 +104,10 @@ export default async function handler(
             }
           );
 
-        // 실제 결제 완료 여부 확인
+        // Stripe 권장 방식:
+        // 실제 payment_status 확인
         if (
-          session.payment_status !==
-          "paid"
+          session.payment_status !== "paid"
         ) {
           console.log(
             "[webhook] Session completed but payment not paid:",
@@ -111,20 +115,20 @@ export default async function handler(
             session.payment_status
           );
 
-          return res
-            .status(200)
-            .json({
-              received: true,
-              processed: false,
-              reason:
-                "payment_not_paid",
-            });
+          return res.status(200).json({
+            received: true,
+            processed: false,
+            reason: "payment_not_paid",
+          });
         }
 
         const metadata =
           session.metadata ?? {};
 
-        // THE HYUN 커스텀 checkout만 처리
+        // =================================================
+        // THE HYUN 커스텀 Checkout만 처리
+        // =================================================
+
         if (
           metadata.source !==
           "webflow_checkout"
@@ -134,118 +138,106 @@ export default async function handler(
             session.id
           );
 
-          return res
-            .status(200)
-            .json({
-              received: true,
-              processed: false,
-              reason:
-                "not_webflow_checkout",
-            });
+          return res.status(200).json({
+            received: true,
+            processed: false,
+            reason: "not_webflow_checkout",
+          });
         }
 
+        // =================================================
+        // Stripe Line Items
+        // =================================================
+
         const lineItems =
-          session.line_items?.data ??
-          [];
+          session.line_items?.data ?? [];
 
-        // 실제 상품만 추출
-        // "Shipping" line은 제외
-        const products =
-          lineItems
-            .filter((item) => {
-              const product =
-                typeof item.price
-                  ?.product ===
-                "object"
-                  ? item.price
-                      .product
-                  : null;
+        const products = lineItems
+          .filter((item) => {
+            const product =
+              typeof item.price?.product ===
+              "object"
+                ? item.price.product
+                : null;
 
-              const name =
-                product &&
-                !(
-                  "deleted" in
-                    product &&
-                  product.deleted
-                ) &&
-                "name" in product
-                  ? product.name
-                  : item.description ??
-                    "";
+            const name =
+              product &&
+              !(
+                "deleted" in product &&
+                product.deleted
+              ) &&
+              "name" in product
+                ? product.name
+                : item.description ?? "";
 
-              return name !== "Shipping";
-            })
-            .map((item) => {
-              const product =
-                typeof item.price
-                  ?.product ===
-                "object"
-                  ? item.price
-                      .product
-                  : null;
+            // Stripe 결제용 Shipping line 제외
+            return name !== "Shipping";
+          })
+          .map((item) => {
+            const product =
+              typeof item.price?.product ===
+              "object"
+                ? item.price.product
+                : null;
 
-              let productName =
-                item.description ??
-                "Item";
+            let productName =
+              item.description ?? "Item";
 
-              let description = "";
+            let description = "";
 
-              if (
-                product &&
-                !(
-                  "deleted" in
-                    product &&
-                  product.deleted
-                )
-              ) {
-                if (
-                  "name" in product
-                ) {
-                  productName =
-                    product.name;
-                }
-
-                if (
-                  "description" in
-                  product
-                ) {
-                  description =
-                    product.description ??
-                    "";
-                }
+            if (
+              product &&
+              !(
+                "deleted" in product &&
+                product.deleted
+              )
+            ) {
+              if ("name" in product) {
+                productName = product.name;
               }
 
-              return {
-                name:
-                  productName,
+              if ("description" in product) {
+                description =
+                  product.description ?? "";
+              }
+            }
 
-                description,
+            return {
+              name: productName,
+              description,
 
-                quantity:
-                  item.quantity ?? 1,
+              quantity:
+                item.quantity ?? 1,
 
-                amountSubtotal:
-                  item.amount_subtotal ??
-                  0,
+              amountSubtotal:
+                item.amount_subtotal ?? 0,
 
-                amountTotal:
-                  item.amount_total ??
-                  0,
+              amountTotal:
+                item.amount_total ?? 0,
 
-                currency:
-                  item.currency ??
-                  session.currency ??
-                  "usd",
-              };
-            });
+              currency:
+                item.currency ??
+                session.currency ??
+                "usd",
+            };
+          });
+
+        // =================================================
+        // Customer 정보
+        // =================================================
 
         const customer =
           session.customer_details;
 
-        // shipping_address_collection으로
-        // Checkout에서 받은 배송 주소 사용
+        // =================================================
+        // Basil API:
+        // shipping_details는
+        // collected_information 안으로 이동됨
+        // =================================================
+
         const shippingDetails =
-          session.shipping_details;
+          session.collected_information
+            ?.shipping_details;
 
         const shippingAddress =
           shippingDetails?.address ??
@@ -257,6 +249,10 @@ export default async function handler(
           customer?.name ??
           "";
 
+        // =================================================
+        // Order 객체 통합
+        // =================================================
+
         const order = {
           stripeSessionId:
             session.id,
@@ -265,9 +261,7 @@ export default async function handler(
             typeof session.payment_intent ===
             "string"
               ? session.payment_intent
-              : session
-                    .payment_intent
-                    ?.id ??
+              : session.payment_intent?.id ??
                 null,
 
           customer: {
@@ -275,12 +269,10 @@ export default async function handler(
               shippingName,
 
             email:
-              customer?.email ??
-              "",
+              customer?.email ?? "",
 
             phone:
-              customer?.phone ??
-              "",
+              customer?.phone ?? "",
           },
 
           shippingAddress:
@@ -313,16 +305,13 @@ export default async function handler(
               : null,
 
           amountSubtotal:
-            session.amount_subtotal ??
-            0,
+            session.amount_subtotal ?? 0,
 
           amountTotal:
-            session.amount_total ??
-            0,
+            session.amount_total ?? 0,
 
           currency:
-            session.currency ??
-            "usd",
+            session.currency ?? "usd",
 
           isDelivery:
             metadata.is_deliver ===
@@ -330,14 +319,12 @@ export default async function handler(
 
           boxCount:
             Number(
-              metadata.box_count ??
-                "0"
+              metadata.box_count ?? "0"
             ),
 
           itemCount:
             Number(
-              metadata.item_count ??
-                "0"
+              metadata.item_count ?? "0"
             ),
 
           shippingService:
@@ -349,11 +336,15 @@ export default async function handler(
             "yes",
 
           giftMessage:
-            metadata.gift_message ??
-            "",
+            metadata.gift_message ?? "",
 
           products,
         };
+
+        // =================================================
+        // 현재 단계:
+        // 주문 데이터 정상 확보 확인
+        // =================================================
 
         console.log(
           "[webhook] ORDER READY",
@@ -365,34 +356,39 @@ export default async function handler(
         );
 
         /*
-          다음 단계에서 연결:
+        =====================================================
+        다음 단계에서 실제 fulfillment 연결
+        =====================================================
 
-          await createShipStationOrder(order);
-          await sendCustomerConfirmation(order);
-          await sendAdminNotification(order);
+        await createShipStationOrder(order);
+
+        await sendCustomerConfirmation(order);
+
+        await sendAdminNotification(order);
+
+        =====================================================
         */
 
-        return res
-          .status(200)
-          .json({
-            received: true,
-            processed: true,
-            sessionId:
-              session.id,
-          });
+        return res.status(200).json({
+          received: true,
+          processed: true,
+          sessionId: session.id,
+        });
       }
+
+      // ===================================================
+      // 기타 이벤트
+      // ===================================================
 
       default: {
         console.log(
           `[webhook] Unhandled event type: ${event.type}`
         );
 
-        return res
-          .status(200)
-          .json({
-            received: true,
-            processed: false,
-          });
+        return res.status(200).json({
+          received: true,
+          processed: false,
+        });
       }
     }
   } catch (err: unknown) {
@@ -406,13 +402,11 @@ export default async function handler(
       message
     );
 
-    // Stripe가 재시도할 수 있도록 500 반환
-    return res
-      .status(500)
-      .json({
-        received: true,
-        processed: false,
-        error: message,
-      });
+    // 500을 반환해야 Stripe가 재시도함
+    return res.status(500).json({
+      received: true,
+      processed: false,
+      error: message,
+    });
   }
 }
