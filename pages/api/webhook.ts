@@ -7,6 +7,8 @@ import type {
 } from "next";
 import Stripe from "stripe";
 
+import { createShipStationOrder } from "@/lib/create-shipstation-order";
+
 export const config = {
   api: {
     bodyParser: false,
@@ -104,8 +106,10 @@ export default async function handler(
             }
           );
 
-        // Stripe 권장 방식:
-        // 실제 payment_status 확인
+        // =================================================
+        // 실제 결제 완료 여부 확인
+        // =================================================
+
         if (
           session.payment_status !== "paid"
         ) {
@@ -170,7 +174,7 @@ export default async function handler(
                 ? product.name
                 : item.description ?? "";
 
-            // Stripe 결제용 Shipping line 제외
+            // 배송비 Line Item 제외
             return name !== "Shipping";
           })
           .map((item) => {
@@ -193,7 +197,8 @@ export default async function handler(
               )
             ) {
               if ("name" in product) {
-                productName = product.name;
+                productName =
+                  product.name;
               }
 
               if ("description" in product) {
@@ -204,6 +209,7 @@ export default async function handler(
 
             return {
               name: productName,
+
               description,
 
               quantity:
@@ -230,9 +236,7 @@ export default async function handler(
           session.customer_details;
 
         // =================================================
-        // Basil API:
-        // shipping_details는
-        // collected_information 안으로 이동됨
+        // Stripe Basil API 배송정보
         // =================================================
 
         const shippingDetails =
@@ -250,7 +254,7 @@ export default async function handler(
           "";
 
         // =================================================
-        // Order 객체 통합
+        // Order 객체 생성
         // =================================================
 
         const order = {
@@ -342,8 +346,7 @@ export default async function handler(
         };
 
         // =================================================
-        // 현재 단계:
-        // 주문 데이터 정상 확보 확인
+        // 주문 데이터 확인 로그
         // =================================================
 
         console.log(
@@ -355,19 +358,33 @@ export default async function handler(
           )
         );
 
-        /*
-        =====================================================
-        다음 단계에서 실제 fulfillment 연결
-        =====================================================
+        // =================================================
+        // ShipStation V1 주문 생성
+        // =================================================
 
-        await createShipStationOrder(order);
+        if (order.isDelivery) {
+          const shipStationResult =
+            await createShipStationOrder(
+              order
+            );
 
-        await sendCustomerConfirmation(order);
+          console.log(
+            "[webhook] SHIPSTATION COMPLETE",
+            JSON.stringify(
+              shipStationResult,
+              null,
+              2
+            )
+          );
+        } else {
+          console.log(
+            "[webhook] Pickup order - ShipStation skipped"
+          );
+        }
 
-        await sendAdminNotification(order);
-
-        =====================================================
-        */
+        // =================================================
+        // 정상 처리 완료
+        // =================================================
 
         return res.status(200).json({
           received: true,
@@ -377,7 +394,7 @@ export default async function handler(
       }
 
       // ===================================================
-      // 기타 이벤트
+      // 기타 Stripe 이벤트
       // ===================================================
 
       default: {
@@ -402,7 +419,8 @@ export default async function handler(
       message
     );
 
-    // 500을 반환해야 Stripe가 재시도함
+    // ShipStation API 오류 등이 발생하면
+    // 500을 반환해서 Stripe가 webhook 재시도
     return res.status(500).json({
       received: true,
       processed: false,
