@@ -195,14 +195,6 @@ export default async function handler(
             checkoutMetadata,
         },
 
-        // Delivery일 때만 Stripe에서 배송주소 수집
-        ...(isDeliver
-          ? {
-              shipping_address_collection: {
-                allowed_countries: ["US"],
-              },
-            }
-          : {}),
 
         // 고객 전화번호 수집
         phone_number_collection: {
