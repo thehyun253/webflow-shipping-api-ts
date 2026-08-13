@@ -7,7 +7,13 @@ import type {
 } from "next";
 import Stripe from "stripe";
 
-import { createShipStationOrder } from "@/lib/create-shipstation-order";
+import {
+  createShipStationOrder,
+} from "@/lib/create-shipstation-order";
+
+import {
+  sendOrderEmails,
+} from "@/lib/send-order-emails";
 
 export const config = {
   api: {
@@ -25,14 +31,18 @@ const stripe = new Stripe(
 const webhookSecret =
   process.env.STRIPE_WEBHOOK_SECRET!;
 
+function clean(
+  value: string | null | undefined
+) {
+  return typeof value === "string"
+    ? value.trim()
+    : "";
+}
+
 export default async function handler(
   req: NextApiRequest,
   res: NextApiResponse
 ) {
-  // =====================================================
-  // 1. Stripe webhook은 POST만 허용
-  // =====================================================
-
   if (req.method !== "POST") {
     return res
       .status(405)
@@ -42,19 +52,27 @@ export default async function handler(
   let event: Stripe.Event;
 
   // =====================================================
-  // 2. Stripe webhook signature 검증
+  // Stripe Signature
   // =====================================================
 
   try {
-    const rawBody = await buffer(req);
+    const rawBody =
+      await buffer(req);
 
     const sig =
-      req.headers["stripe-signature"];
+      req.headers[
+        "stripe-signature"
+      ];
 
-    if (!sig || Array.isArray(sig)) {
+    if (
+      !sig ||
+      Array.isArray(sig)
+    ) {
       return res
         .status(400)
-        .send("Missing Stripe signature");
+        .send(
+          "Missing Stripe signature"
+        );
     }
 
     event =
@@ -76,11 +94,13 @@ export default async function handler(
 
     return res
       .status(400)
-      .send(`Webhook Error: ${message}`);
+      .send(
+        `Webhook Error: ${message}`
+      );
   }
 
   // =====================================================
-  // 3. Stripe 이벤트 처리
+  // Event
   // =====================================================
 
   try {
@@ -89,10 +109,6 @@ export default async function handler(
         const eventSession =
           event.data
             .object as Stripe.Checkout.Session;
-
-        // =================================================
-        // 최신 Checkout Session 다시 조회
-        // =================================================
 
         const session =
           await stripe.checkout.sessions.retrieve(
@@ -106,32 +122,28 @@ export default async function handler(
             }
           );
 
-        // =================================================
-        // 실제 결제 완료 여부 확인
-        // =================================================
-
         if (
-          session.payment_status !== "paid"
+          session.payment_status !==
+          "paid"
         ) {
           console.log(
-            "[webhook] Session completed but payment not paid:",
+            "[webhook] Payment not paid:",
             session.id,
             session.payment_status
           );
 
-          return res.status(200).json({
-            received: true,
-            processed: false,
-            reason: "payment_not_paid",
-          });
+          return res
+            .status(200)
+            .json({
+              received: true,
+              processed: false,
+              reason:
+                "payment_not_paid",
+            });
         }
 
         const metadata =
           session.metadata ?? {};
-
-        // =================================================
-        // THE HYUN 커스텀 Checkout만 처리
-        // =================================================
 
         if (
           metadata.source !==
@@ -142,119 +154,279 @@ export default async function handler(
             session.id
           );
 
-          return res.status(200).json({
-            received: true,
-            processed: false,
-            reason: "not_webflow_checkout",
-          });
+          return res
+            .status(200)
+            .json({
+              received: true,
+              processed: false,
+              reason:
+                "not_webflow_checkout",
+            });
         }
 
         // =================================================
-        // Stripe Line Items
+        // Products
         // =================================================
 
         const lineItems =
-          session.line_items?.data ?? [];
+          session.line_items?.data ??
+          [];
 
-        const products = lineItems
-          .filter((item) => {
-            const product =
-              typeof item.price?.product ===
-              "object"
-                ? item.price.product
-                : null;
+        const products =
+          lineItems
+            .filter((item) => {
+              const product =
+                typeof item.price
+                  ?.product ===
+                "object"
+                  ? item.price
+                      .product
+                  : null;
 
-            const name =
-              product &&
-              !(
-                "deleted" in product &&
-                product.deleted
-              ) &&
-              "name" in product
-                ? product.name
-                : item.description ?? "";
+              const name =
+                product &&
+                !(
+                  "deleted" in
+                    product &&
+                  product.deleted
+                ) &&
+                "name" in product
+                  ? product.name
+                  : item.description ??
+                    "";
 
-            // 배송비 Line Item 제외
-            return name !== "Shipping";
-          })
-          .map((item) => {
-            const product =
-              typeof item.price?.product ===
-              "object"
-                ? item.price.product
-                : null;
+              return (
+                name !== "Shipping"
+              );
+            })
+            .map((item) => {
+              const product =
+                typeof item.price
+                  ?.product ===
+                "object"
+                  ? item.price
+                      .product
+                  : null;
 
-            let productName =
-              item.description ?? "Item";
+              let productName =
+                item.description ??
+                "Item";
 
-            let description = "";
+              let description =
+                "";
 
-            if (
-              product &&
-              !(
-                "deleted" in product &&
-                product.deleted
-              )
-            ) {
-              if ("name" in product) {
-                productName =
-                  product.name;
+              if (
+                product &&
+                !(
+                  "deleted" in
+                    product &&
+                  product.deleted
+                )
+              ) {
+                if (
+                  "name" in product
+                ) {
+                  productName =
+                    product.name;
+                }
+
+                if (
+                  "description" in
+                  product
+                ) {
+                  description =
+                    product.description ??
+                    "";
+                }
               }
 
-              if ("description" in product) {
-                description =
-                  product.description ?? "";
-              }
-            }
+              return {
+                name:
+                  productName,
 
-            return {
-              name: productName,
+                description,
 
-              description,
+                quantity:
+                  item.quantity ??
+                  1,
 
-              quantity:
-                item.quantity ?? 1,
+                amountSubtotal:
+                  item.amount_subtotal ??
+                  0,
 
-              amountSubtotal:
-                item.amount_subtotal ?? 0,
+                amountTotal:
+                  item.amount_total ??
+                  0,
 
-              amountTotal:
-                item.amount_total ?? 0,
-
-              currency:
-                item.currency ??
-                session.currency ??
-                "usd",
-            };
-          });
+                currency:
+                  item.currency ??
+                  session.currency ??
+                  "usd",
+              };
+            });
 
         // =================================================
-        // Customer 정보
+        // Customer
         // =================================================
 
         const customer =
           session.customer_details;
 
-        // =================================================
-        // Stripe Basil API 배송정보
-        // =================================================
-
-        const shippingDetails =
-          session.collected_information
+        const stripeShipping =
+          session
+            .collected_information
             ?.shipping_details;
 
-        const shippingAddress =
-          shippingDetails?.address ??
-          customer?.address ??
-          null;
-
         const shippingName =
-          shippingDetails?.name ??
-          customer?.name ??
-          "";
+          clean(
+            metadata.shipping_name
+          ) ||
+          clean(
+            stripeShipping?.name
+          ) ||
+          clean(
+            customer?.name
+          );
+
+        const metadataAddress = {
+          line1:
+            clean(
+              metadata.shipping_line1
+            ),
+
+          line2:
+            clean(
+              metadata.shipping_line2
+            ),
+
+          city:
+            clean(
+              metadata.shipping_city
+            ),
+
+          state:
+            clean(
+              metadata.shipping_state
+            ),
+
+          postalCode:
+            clean(
+              metadata.shipping_postal_code
+            ),
+
+          country:
+            clean(
+              metadata.shipping_country
+            ) || "US",
+        };
+
+        const hasWebflowAddress =
+          Boolean(
+            metadataAddress.line1 ||
+            metadataAddress.city ||
+            metadataAddress.postalCode
+          );
+
+        let shippingAddress:
+          | {
+              line1: string;
+              line2: string;
+              city: string;
+              state: string;
+              postalCode: string;
+              country: string;
+            }
+          | null = null;
+
+        if (
+          hasWebflowAddress
+        ) {
+          shippingAddress =
+            metadataAddress;
+        } else if (
+          stripeShipping
+            ?.address
+        ) {
+          shippingAddress = {
+            line1:
+              stripeShipping
+                .address.line1 ??
+              "",
+
+            line2:
+              stripeShipping
+                .address.line2 ??
+              "",
+
+            city:
+              stripeShipping
+                .address.city ??
+              "",
+
+            state:
+              stripeShipping
+                .address.state ??
+              "",
+
+            postalCode:
+              stripeShipping
+                .address
+                .postal_code ??
+              "",
+
+            country:
+              stripeShipping
+                .address.country ??
+              "US",
+          };
+        } else if (
+          customer?.address
+        ) {
+          shippingAddress = {
+            line1:
+              customer.address
+                .line1 ?? "",
+
+            line2:
+              customer.address
+                .line2 ?? "",
+
+            city:
+              customer.address
+                .city ?? "",
+
+            state:
+              customer.address
+                .state ?? "",
+
+            postalCode:
+              customer.address
+                .postal_code ?? "",
+
+            country:
+              customer.address
+                .country ?? "US",
+          };
+        }
+
+        const customerEmail =
+          clean(
+            customer?.email
+          ) ||
+          clean(
+            metadata.webflow_email
+          );
+
+        const customerPhone =
+          clean(
+            customer?.phone
+          ) ||
+          clean(
+            metadata.webflow_phone
+          );
 
         // =================================================
-        // Order 객체 생성
+        // Order
         // =================================================
 
         const order = {
@@ -265,57 +437,34 @@ export default async function handler(
             typeof session.payment_intent ===
             "string"
               ? session.payment_intent
-              : session.payment_intent?.id ??
-                null,
+              : session
+                  .payment_intent
+                  ?.id ?? null,
 
           customer: {
             name:
               shippingName,
 
             email:
-              customer?.email ?? "",
+              customerEmail,
 
             phone:
-              customer?.phone ?? "",
+              customerPhone,
           },
 
-          shippingAddress:
-            shippingAddress
-              ? {
-                  line1:
-                    shippingAddress.line1 ??
-                    "",
-
-                  line2:
-                    shippingAddress.line2 ??
-                    "",
-
-                  city:
-                    shippingAddress.city ??
-                    "",
-
-                  state:
-                    shippingAddress.state ??
-                    "",
-
-                  postalCode:
-                    shippingAddress.postal_code ??
-                    "",
-
-                  country:
-                    shippingAddress.country ??
-                    "",
-                }
-              : null,
+          shippingAddress,
 
           amountSubtotal:
-            session.amount_subtotal ?? 0,
+            session.amount_subtotal ??
+            0,
 
           amountTotal:
-            session.amount_total ?? 0,
+            session.amount_total ??
+            0,
 
           currency:
-            session.currency ?? "usd",
+            session.currency ??
+            "usd",
 
           isDelivery:
             metadata.is_deliver ===
@@ -323,12 +472,14 @@ export default async function handler(
 
           boxCount:
             Number(
-              metadata.box_count ?? "0"
+              metadata.box_count ??
+              "0"
             ),
 
           itemCount:
             Number(
-              metadata.item_count ?? "0"
+              metadata.item_count ??
+              "0"
             ),
 
           shippingService:
@@ -340,14 +491,11 @@ export default async function handler(
             "yes",
 
           giftMessage:
-            metadata.gift_message ?? "",
+            metadata.gift_message ??
+            "",
 
           products,
         };
-
-        // =================================================
-        // 주문 데이터 확인 로그
-        // =================================================
 
         console.log(
           "[webhook] ORDER READY",
@@ -359,10 +507,20 @@ export default async function handler(
         );
 
         // =================================================
-        // ShipStation V1 주문 생성
+        // ShipStation
         // =================================================
 
-        if (order.isDelivery) {
+        if (
+          order.isDelivery
+        ) {
+          if (
+            !order.shippingAddress
+          ) {
+            throw new Error(
+              "Delivery order is missing shipping address."
+            );
+          }
+
           const shipStationResult =
             await createShipStationOrder(
               order
@@ -383,29 +541,48 @@ export default async function handler(
         }
 
         // =================================================
-        // 정상 처리 완료
+        // Customer + Admin Email
         // =================================================
 
-        return res.status(200).json({
-          received: true,
-          processed: true,
-          sessionId: session.id,
-        });
-      }
+        const emailResult =
+          await sendOrderEmails(
+            order
+          );
 
-      // ===================================================
-      // 기타 Stripe 이벤트
-      // ===================================================
+        console.log(
+          "[webhook] EMAILS COMPLETE",
+          JSON.stringify(
+            emailResult,
+            null,
+            2
+          )
+        );
+
+        // =================================================
+        // Success
+        // =================================================
+
+        return res
+          .status(200)
+          .json({
+            received: true,
+            processed: true,
+            sessionId:
+              session.id,
+          });
+      }
 
       default: {
         console.log(
           `[webhook] Unhandled event type: ${event.type}`
         );
 
-        return res.status(200).json({
-          received: true,
-          processed: false,
-        });
+        return res
+          .status(200)
+          .json({
+            received: true,
+            processed: false,
+          });
       }
     }
   } catch (err: unknown) {
@@ -419,12 +596,13 @@ export default async function handler(
       message
     );
 
-    // ShipStation API 오류 등이 발생하면
-    // 500을 반환해서 Stripe가 webhook 재시도
-    return res.status(500).json({
-      received: true,
-      processed: false,
-      error: message,
-    });
+    return res
+      .status(500)
+      .json({
+        received: true,
+        processed: false,
+        error:
+          message,
+      });
   }
 }
