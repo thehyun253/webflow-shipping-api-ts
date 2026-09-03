@@ -168,7 +168,12 @@ async function getShipStationFedExRate(params: {
         height: BOX_HEIGHT
       },
       confirmation: "delivery",
-      residential: false
+
+      /*
+        Customer addresses are usually residential.
+        This gives a safer/more realistic FedEx rate.
+      */
+      residential: true
     })
   });
 
