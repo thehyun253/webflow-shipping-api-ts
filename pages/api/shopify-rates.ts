@@ -179,10 +179,10 @@ export default function handler(
     return res.status(200).json({
       rates: [
         {
-          service_name: "THE HYUN Local Delivery",
-          service_code: "the_hyun_local_delivery",
+          service_name: "FedEx Priority Overnight",
+          service_code: "fedex_priority_overnight",
           total_price: String(totalPriceCents),
-          description: "Local refrigerated delivery",
+          description: "Next-day refrigerated shipping",
           currency,
           min_delivery_date: toShopifyDateTime(minDeliveryDate),
           max_delivery_date: toShopifyDateTime(maxDeliveryDate),
