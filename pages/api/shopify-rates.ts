@@ -36,6 +36,27 @@ type ShopifyRateResponse = {
   }>;
 };
 
+type ShipStationRate = {
+  serviceName?: string;
+  serviceCode?: string;
+  shipmentCost?: number;
+  otherCost?: number;
+};
+
+const SHIPSTATION_API_KEY = process.env.SHIPSTATION_API_KEY;
+const SHIPSTATION_API_SECRET = process.env.SHIPSTATION_API_SECRET;
+
+const FROM_POSTAL_CODE = "10010";
+const FROM_COUNTRY = "US";
+
+const CARRIER_CODE = "fedex_walleted";
+const SERVICE_CODE = "fedex_priority_overnight";
+const PACKAGE_CODE = "package";
+
+const BOX_LENGTH = 21.7;
+const BOX_WIDTH = 13.4;
+const BOX_HEIGHT = 10.65;
+
 function normalizeZip(zip: string | undefined | null): string {
   return String(zip || "")
     .trim()
@@ -54,13 +75,6 @@ function getBoxCount(items?: ShopifyRateItem[]): number {
     const name = String(item.name || "").toLowerCase();
     const quantity = Number(item.quantity || 1);
 
-    /*
-      THE HYUN packing logic:
-      - Innards / Baby type items = 2 packs per item
-      - Other regular items = 3 packs per item
-      - 10 packs per shipping box
-    */
-
     const isTwoPackItem =
       name.includes("innard") ||
       name.includes("inner") ||
@@ -75,48 +89,33 @@ function getBoxCount(items?: ShopifyRateItem[]): number {
   return Math.max(1, Math.ceil(totalPacks / 10));
 }
 
-function getBaseDeliveryRateCents(zip: string): number | null {
+function getTotalWeightOz(items?: ShopifyRateItem[]): number {
+  if (!items || !Array.isArray(items) || items.length === 0) {
+    return 320;
+  }
+
+  let totalGrams = 0;
+
+  for (const item of items) {
+    const grams = Number(item.grams || 0);
+    const quantity = Number(item.quantity || 1);
+
+    totalGrams += grams * quantity;
+  }
+
+  if (totalGrams <= 0) {
+    return 320;
+  }
+
+  const itemWeightOz = totalGrams / 28.3495;
+
   /*
-    Temporary ZIP delivery rate table.
-    Update this table later with THE HYUN's final delivery zones.
-
-    total_price is in cents:
-    $25.00 = 2500
-    $35.00 = 3500
+    Add estimated dry ice / insulation / packaging weight.
+    기본 포장 무게 8 lb = 128 oz.
   */
+  const packagingWeightOz = 128;
 
-  const manhattan25 = new Set([
-    "10001", "10002", "10003", "10004", "10005",
-    "10006", "10007", "10009", "10010", "10011",
-    "10012", "10013", "10014", "10016", "10017",
-    "10018", "10019", "10020", "10021", "10022",
-    "10023", "10024", "10025", "10026", "10027",
-    "10028", "10029", "10030", "10031", "10032",
-    "10033", "10034", "10035", "10036", "10037",
-    "10038", "10039", "10040", "10044", "10065",
-    "10069", "10075", "10128", "10280", "10282"
-  ]);
-
-  const brooklyn35 = new Set([
-    "11201", "11205", "11206", "11211", "11215",
-    "11217", "11222", "11231", "11238"
-  ]);
-
-  const queens45 = new Set([
-    "11101", "11102", "11103", "11104", "11105",
-    "11106", "11377", "11378", "11385"
-  ]);
-
-  const nj55 = new Set([
-    "07030", "07086", "07302", "07310", "07311"
-  ]);
-
-  if (manhattan25.has(zip)) return 2500;
-  if (brooklyn35.has(zip)) return 3500;
-  if (queens45.has(zip)) return 4500;
-  if (nj55.has(zip)) return 5500;
-
-  return null;
+  return Math.ceil(itemWeightOz + packagingWeightOz);
 }
 
 function addBusinessDays(date: Date, days: number): Date {
@@ -138,9 +137,85 @@ function toShopifyDateTime(date: Date): string {
   return date.toISOString();
 }
 
-export default function handler(
+function getBasicAuthHeader(): string {
+  const token = Buffer.from(
+    `${SHIPSTATION_API_KEY}:${SHIPSTATION_API_SECRET}`
+  ).toString("base64");
+
+  return `Basic ${token}`;
+}
+
+async function getShipStationFedExRate(params: {
+  toZip: string;
+  toState?: string;
+  toCity?: string;
+  toCountry?: string;
+  weightOz: number;
+}): Promise<number | null> {
+  if (!SHIPSTATION_API_KEY || !SHIPSTATION_API_SECRET) {
+    throw new Error("Missing ShipStation API credentials");
+  }
+
+  const response = await fetch("https://ssapi.shipstation.com/shipments/getrates", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      Authorization: getBasicAuthHeader()
+    },
+    body: JSON.stringify({
+      carrierCode: CARRIER_CODE,
+      serviceCode: SERVICE_CODE,
+      packageCode: PACKAGE_CODE,
+      fromPostalCode: FROM_POSTAL_CODE,
+      toState: params.toState || "",
+      toCountry: params.toCountry || FROM_COUNTRY,
+      toPostalCode: params.toZip,
+      toCity: params.toCity || "",
+      weight: {
+        value: params.weightOz,
+        units: "ounces"
+      },
+      dimensions: {
+        units: "inches",
+        length: BOX_LENGTH,
+        width: BOX_WIDTH,
+        height: BOX_HEIGHT
+      },
+      confirmation: "delivery",
+      residential: false
+    })
+  });
+
+  const data = await response.json();
+
+  if (!response.ok) {
+    console.error("ShipStation getrates failed:", data);
+    return null;
+  }
+
+  const rates = Array.isArray(data) ? (data as ShipStationRate[]) : [];
+
+  const targetRate =
+    rates.find((rate) => rate.serviceCode === SERVICE_CODE) || rates[0];
+
+  if (!targetRate) {
+    return null;
+  }
+
+  const shipmentCost = Number(targetRate.shipmentCost || 0);
+  const otherCost = Number(targetRate.otherCost || 0);
+  const total = shipmentCost + otherCost;
+
+  if (!Number.isFinite(total) || total <= 0) {
+    return null;
+  }
+
+  return Math.round(total * 100);
+}
+
+export default async function handler(
   req: NextApiRequest,
-  res: NextApiResponse<ShopifyRateResponse | { error: string }>
+  res: NextApiResponse<ShopifyRateResponse | { error: string; message?: string }>
 ) {
   if (req.method !== "POST") {
     return res.status(405).json({ error: "Method not allowed" });
@@ -150,31 +225,38 @@ export default function handler(
     const body = req.body as ShopifyRateRequest;
     const rate = body.rate;
 
-    const zip = normalizeZip(rate?.destination?.postal_code);
+    const destination = rate?.destination;
+    const zip = normalizeZip(destination?.postal_code);
     const currency = rate?.currency || "USD";
 
     if (!zip) {
       return res.status(200).json({ rates: [] });
     }
 
-    const baseRateCents = getBaseDeliveryRateCents(zip);
+    const boxCount = getBoxCount(rate?.items);
+    const totalWeightOz = getTotalWeightOz(rate?.items);
 
-    if (baseRateCents === null) {
+    /*
+      ShipStation getrates는 한 박스 기준으로 호출.
+      여러 박스면 같은 목적지/같은 박스 조건으로 boxCount만큼 곱함.
+      나중에 multi-package exact quote가 필요하면 여기 확장 가능.
+    */
+    const oneBoxRateCents = await getShipStationFedExRate({
+      toZip: zip,
+      toState: destination?.province,
+      toCity: destination?.city,
+      toCountry: destination?.country || "US",
+      weightOz: Math.ceil(totalWeightOz / boxCount)
+    });
+
+    if (oneBoxRateCents === null) {
       return res.status(200).json({ rates: [] });
     }
 
-    const boxCount = getBoxCount(rate?.items);
-
-    /*
-      If there are 2 or more boxes, add $15 per extra box.
-      If you do not want extra box fees, change 1500 to 0.
-    */
-    const extraBoxFeeCents = Math.max(0, boxCount - 1) * 1500;
-    const totalPriceCents = baseRateCents + extraBoxFeeCents;
+    const totalPriceCents = oneBoxRateCents * boxCount;
 
     const now = new Date();
-    const minDeliveryDate = addBusinessDays(now, 1);
-    const maxDeliveryDate = addBusinessDays(now, 2);
+    const deliveryDate = addBusinessDays(now, 1);
 
     return res.status(200).json({
       rates: [
@@ -184,14 +266,14 @@ export default function handler(
           total_price: String(totalPriceCents),
           description: "Next-day refrigerated shipping",
           currency,
-          min_delivery_date: toShopifyDateTime(minDeliveryDate),
-          max_delivery_date: toShopifyDateTime(maxDeliveryDate),
+          min_delivery_date: toShopifyDateTime(deliveryDate),
+          max_delivery_date: toShopifyDateTime(deliveryDate),
           phone_required: true
         }
       ]
     });
   } catch (error) {
-    console.error("Shopify rates error:", error);
+    console.error("Shopify ShipStation rates error:", error);
 
     return res.status(200).json({
       rates: []
