@@ -30,8 +30,6 @@ type ShopifyRateResponse = {
     total_price: string;
     description: string;
     currency: string;
-    min_delivery_date?: string;
-    max_delivery_date?: string;
     phone_required?: boolean;
   }>;
 };
@@ -75,6 +73,13 @@ function getBoxCount(items?: ShopifyRateItem[]): number {
     const name = String(item.name || "").toLowerCase();
     const quantity = Number(item.quantity || 1);
 
+    /*
+      THE HYUN packing logic:
+      - Innards / Baby type items = 2 packs per item
+      - Other regular items = 3 packs per item
+      - 10 packs per shipping box
+    */
+
     const isTwoPackItem =
       name.includes("innard") ||
       name.includes("inner") ||
@@ -110,31 +115,12 @@ function getTotalWeightOz(items?: ShopifyRateItem[]): number {
   const itemWeightOz = totalGrams / 28.3495;
 
   /*
-    Add estimated dry ice / insulation / packaging weight.
-    기본 포장 무게 8 lb = 128 oz.
+    Estimated dry ice / insulation / packaging weight.
+    8 lb = 128 oz.
   */
   const packagingWeightOz = 128;
 
   return Math.ceil(itemWeightOz + packagingWeightOz);
-}
-
-function addBusinessDays(date: Date, days: number): Date {
-  const result = new Date(date);
-
-  while (days > 0) {
-    result.setDate(result.getDate() + 1);
-    const day = result.getDay();
-
-    if (day !== 0 && day !== 6) {
-      days -= 1;
-    }
-  }
-
-  return result;
-}
-
-function toShopifyDateTime(date: Date): string {
-  return date.toISOString();
 }
 
 function getBasicAuthHeader(): string {
@@ -237,9 +223,8 @@ export default async function handler(
     const totalWeightOz = getTotalWeightOz(rate?.items);
 
     /*
-      ShipStation getrates는 한 박스 기준으로 호출.
-      여러 박스면 같은 목적지/같은 박스 조건으로 boxCount만큼 곱함.
-      나중에 multi-package exact quote가 필요하면 여기 확장 가능.
+      ShipStation getrates is called per box.
+      If multiple boxes are needed, we multiply the one-box rate by box count.
     */
     const oneBoxRateCents = await getShipStationFedExRate({
       toZip: zip,
@@ -255,9 +240,6 @@ export default async function handler(
 
     const totalPriceCents = oneBoxRateCents * boxCount;
 
-    const now = new Date();
-    const deliveryDate = addBusinessDays(now, 1);
-
     return res.status(200).json({
       rates: [
         {
@@ -266,9 +248,7 @@ export default async function handler(
           total_price: String(totalPriceCents),
           description: "Overnight delivery after shipment",
           currency,
-          min_delivery_date: toShopifyDateTime(deliveryDate),
-          max_delivery_date: toShopifyDateTime(deliveryDate),
-          phone_required: true
+          phone_required: false
         }
       ]
     });
