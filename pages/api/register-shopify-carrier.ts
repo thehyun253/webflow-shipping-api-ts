@@ -18,7 +18,15 @@ const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 
 const API_VERSION = "2026-07";
+
+/*
+  This is the app/carrier name shown inside Shopify Admin.
+  Customer-facing checkout rate name still comes from shopify-rates.ts:
+  service_name: "FedEx Priority Overnight"
+*/
 const CARRIER_SERVICE_NAME = "FedEx Priority Overnight";
+const OLD_CARRIER_SERVICE_NAME = "THE HYUN Local Delivery";
+
 const CALLBACK_URL = "https://shipping.thehyun.com/api/shopify-rates";
 
 async function shopifyRequest<T>(
@@ -77,10 +85,6 @@ export default async function handler(
   }
 
   try {
-    /*
-      1. Check existing carrier services first
-      This prevents duplicate "THE HYUN Local Delivery" rates.
-    */
     const existingResponse = await shopifyRequest<CarrierServicesResponse>(
       "/carrier_services.json",
       {
@@ -95,13 +99,24 @@ export default async function handler(
       });
     }
 
-    const existingCarrier = existingResponse.data.carrier_services?.find(
-      (service) => service.name === CARRIER_SERVICE_NAME
-    );
+    const existingServices = existingResponse.data.carrier_services || [];
 
     /*
-      2. If carrier already exists, update it.
+      Find the existing service by:
+      1. New name
+      2. Old name
+      3. Same callback URL
+
+      This prevents duplicate carrier service errors.
     */
+    const existingCarrier = existingServices.find((service) => {
+      return (
+        service.name === CARRIER_SERVICE_NAME ||
+        service.name === OLD_CARRIER_SERVICE_NAME ||
+        service.callback_url === CALLBACK_URL
+      );
+    });
+
     if (existingCarrier) {
       const updateResponse = await shopifyRequest<CarrierServicesResponse>(
         `/carrier_services/${existingCarrier.id}.json`,
@@ -122,6 +137,7 @@ export default async function handler(
       if (!updateResponse.ok) {
         return res.status(updateResponse.status).json({
           error: "Failed to update carrier service",
+          existing_carrier: existingCarrier,
           data: updateResponse.data
         });
       }
@@ -130,13 +146,11 @@ export default async function handler(
         success: true,
         action: "updated",
         message: "Carrier service updated successfully",
+        previous_name: existingCarrier.name,
         carrier_service: updateResponse.data.carrier_service
       });
     }
 
-    /*
-      3. If carrier does not exist, create it.
-    */
     const createResponse = await shopifyRequest<CarrierServicesResponse>(
       "/carrier_services.json",
       {
