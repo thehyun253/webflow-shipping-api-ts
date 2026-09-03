@@ -18,7 +18,7 @@ const SHOPIFY_SHOP = process.env.SHOPIFY_SHOP;
 const SHOPIFY_ACCESS_TOKEN = process.env.SHOPIFY_ADMIN_ACCESS_TOKEN;
 
 const API_VERSION = "2026-07";
-const CARRIER_SERVICE_NAME = "THE HYUN Local Delivery";
+const CARRIER_SERVICE_NAME = "FedEx Priority Overnight";
 const CALLBACK_URL = "https://shipping.thehyun.com/api/shopify-rates";
 
 async function shopifyRequest<T>(
