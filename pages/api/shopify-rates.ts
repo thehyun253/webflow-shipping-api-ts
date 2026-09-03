@@ -264,7 +264,7 @@ export default async function handler(
           service_name: "FedEx Priority Overnight",
           service_code: "fedex_priority_overnight",
           total_price: String(totalPriceCents),
-          description: "Next-day refrigerated shipping",
+          description: "Overnight delivery after shipment",
           currency,
           min_delivery_date: toShopifyDateTime(deliveryDate),
           max_delivery_date: toShopifyDateTime(deliveryDate),
