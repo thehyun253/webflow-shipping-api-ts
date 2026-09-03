@@ -25,7 +25,7 @@ export default function handler(req: NextApiRequest, res: NextApiResponse) {
     return res.status(400).send("Missing or invalid shop");
   }
 
-  const redirectUri = `${HOST_URL}/api/shopify/auth/callback`;
+  const redirectUri = `${HOST_URL}/api/shopify/callback`;
   const state = Math.random().toString(36).slice(2);
 
   const installUrl =
