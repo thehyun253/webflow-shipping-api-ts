@@ -1,5 +1,15 @@
 import type { NextApiRequest, NextApiResponse } from "next";
 
+type ShopifyRateItem = {
+  name?: string;
+  quantity?: number;
+  grams?: number;
+  price?: number;
+  sku?: string;
+  variant_id?: number;
+  product_id?: number;
+};
+
 type ShopifyRateRequest = {
   rate?: {
     destination?: {
@@ -8,15 +18,7 @@ type ShopifyRateRequest = {
       city?: string;
       postal_code?: string;
     };
-    items?: Array<{
-      name?: string;
-      quantity?: number;
-      grams?: number;
-      price?: number;
-      sku?: string;
-      variant_id?: number;
-      product_id?: number;
-    }>;
+    items?: ShopifyRateItem[];
     currency?: string;
   };
 };
@@ -41,7 +43,7 @@ function normalizeZip(zip: string | undefined | null): string {
     .replace(/\D/g, "");
 }
 
-function getBoxCount(items: ShopifyRateRequest["rate"]["items"]): number {
+function getBoxCount(items?: ShopifyRateItem[]): number {
   if (!items || !Array.isArray(items) || items.length === 0) {
     return 1;
   }
@@ -75,10 +77,10 @@ function getBoxCount(items: ShopifyRateRequest["rate"]["items"]): number {
 
 function getBaseDeliveryRateCents(zip: string): number | null {
   /*
-    임시 ZIP 배송료 테이블.
-    나중에 실제 배송료에 맞게 여기만 수정하면 됨.
+    Temporary ZIP delivery rate table.
+    Update this table later with THE HYUN's final delivery zones.
 
-    total_price는 cents 단위:
+    total_price is in cents:
     $25.00 = 2500
     $35.00 = 3500
   */
@@ -164,8 +166,8 @@ export default function handler(
     const boxCount = getBoxCount(rate?.items);
 
     /*
-      박스가 2개 이상이면 추가 박스당 $15 추가.
-      원하지 않으면 아래 extraBoxFeeCents를 0으로 바꾸면 됨.
+      If there are 2 or more boxes, add $15 per extra box.
+      If you do not want extra box fees, change 1500 to 0.
     */
     const extraBoxFeeCents = Math.max(0, boxCount - 1) * 1500;
     const totalPriceCents = baseRateCents + extraBoxFeeCents;
